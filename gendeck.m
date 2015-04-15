@@ -319,13 +319,13 @@ while ~feof(layoutfile)
             else
                 if length(card)==2
                 %If the third parameter name is missing from the layout file
-                    efield='-1';
+                    efield=-1;
                 elseif isfield(settings,(card{1,3})) && ~isempty(settings.(card{1,3}))
                     %If the field is present and not empty, set the efield
                     efield=settings.(card{1,3});
                     unitstruct.(card{1,3})='[kV/cm]';
                 else %Otherwise use nominal value
-                    efield='-1';
+                    efield=-1;
                     unitstruct.(card{1,3})='[kV/cm]';
                 end
                 fprintf(outfile,'%s %s %s %g\r\n', devices{id,1}{1,2},...
