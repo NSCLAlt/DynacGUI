@@ -63,6 +63,7 @@ function varargout=emitplot(freqlist,varargin)
 %3/30/15 - Fixed "save particle distribution" problems.
 %        - Write particle distribution now works for charge states not +1
 %        - Also now works for multiple charge state beams
+%4/16/15 - Changed realspace text from RMS to sigma.
 
 if (nargin>=4)
     epfilename=[varargin{3} filesep 'emit.plot'];
@@ -233,7 +234,7 @@ while ~feof(plotfile)
                 [yelements,ycenters]=hist(y,30);
                 xyxhist=plot(xcenters,(xelements/((ylim(2)-ylim(1))*max(xelements)))+ylim(1));
                 xyyhist=plot((yelements/((xlim(2)-xlim(1))*max(yelements)))+xlim(1),ycenters);
-                profiletext=sprintf('X RMS: %g\nY RMS: %g',rms(x),rms(y));
+                profiletext=sprintf('X \\sigma = %g\nY \\sigma = %g',std(x),std(y));
                 xyt=text(xlim(2),ylim(2),profiletext,'HorizontalAlignment','right',...
                     'VerticalAlignment','top','FontSize',8);
                 %rescale on mouse click
@@ -525,7 +526,7 @@ while ~feof(plotfile)
                 [yelements,ycenters]=hist(y,30);
                 xyxhist=plot(xcenters,(xelements/((ylim(2)-ylim(1))*max(xelements)))+ylim(1));
                 xyyhist=plot((yelements/((xlim(2)-xlim(1))*max(yelements)))+xlim(1),ycenters);
-                profiletext=sprintf('X RMS: %g\nY RMS: %g',rms(x),rms(y));
+                profiletext=sprintf('X \\sigma = %g\nY \\sigma = %g',std(x),std(y));
                 xyt=text(xlim(2),ylim(2),profiletext,'HorizontalAlignment','right',...
                     'VerticalAlignment','top','FontSize',8);
                 %rescale on mouse click
