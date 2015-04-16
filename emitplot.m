@@ -64,6 +64,7 @@ function varargout=emitplot(freqlist,varargin)
 %        - Write particle distribution now works for charge states not +1
 %        - Also now works for multiple charge state beams
 %4/16/15 - Changed realspace text from RMS to sigma.
+%        - Removed x/y oval, since it seems to be wrong.
 
 if (nargin>=4)
     epfilename=[varargin{3} filesep 'emit.plot'];
@@ -239,7 +240,8 @@ while ~feof(plotfile)
                     'VerticalAlignment','top','FontSize',8);
                 %rescale on mouse click
                 set(gca,'ButtonDownFcn', {@mouseclick_callback,xyt,xyxhist,xyyhist});
-                plot(xxpoval(:,1),yypoval(:,1),'g');
+                %plot the ellipse
+                %plot(xxpoval(:,1),yypoval(:,1),'g');
                 hold off;
             %Generate the phase/energy plot
             teplot=subplot(2,2,4);
@@ -531,7 +533,8 @@ while ~feof(plotfile)
                     'VerticalAlignment','top','FontSize',8);
                 %rescale on mouse click
                 set(gca,'ButtonDownFcn', {@mouseclick_callback,xyt,xyxhist,xyyhist});
-                plot(xxpoval(:,1),yypoval(:,1),'g');
+                %Plot the ellipse
+                %plot(xxpoval(:,1),yypoval(:,1),'g');
                 hold off;
             %Generate the phase/energy plot
             teplot=subplot(2,2,4);
