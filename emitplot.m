@@ -65,6 +65,13 @@ function varargout=emitplot(freqlist,varargin)
 %        - Also now works for multiple charge state beams
 %4/16/15 - Changed realspace text from RMS to sigma.
 %        - Removed x/y oval, since it seems to be wrong.
+%        - Made dots in multi-charge state plots smaller for consistency
+%4/23/15 - Dispersion Plot for multi-charge state beam
+%4/24/15 - Fixed serious error in dispersion fitting.
+%4/27/15 - This time I think the dispersion is actually correct.
+
+%To Do - add dispersion labels to multi-charge state p vs. x plot
+%      - check RESULTS for multi charge state plot
 
 if (nargin>=4)
     epfilename=[varargin{3} filesep 'emit.plot'];
@@ -447,7 +454,7 @@ while ~feof(plotfile)
             wm0=uimenu(toolsmenu,'Label','Show Beam Data',...
                 'Callback',{@showdata,plottitle});
             wm1=uimenu(toolsmenu,'Label','Auxiliary Plots');
-            %REACTIVATE THESE WHEN MULTI-CHARGE STATE EXPORT IMPLIMENTED
+            %REACTIVATE THESE WHEN (if?) MULTI-CHARGE STATE EXPORT IMPLIMENTED
             wm2=uimenu(toolsmenu,'Label',...
                 'Write Particle Distribution to File','Callback',...
                 {@write_distribution,x,xp,y,yp,phase,energy,freqlist(plotnumber),xchg},...
@@ -472,12 +479,14 @@ while ~feof(plotfile)
                 {@xe_plot,x,energy,xchg});
             pm3=uimenu(wm1,'Label','Y vs. Energy','Callback',...
                 {@ye_plot,y,energy,ychg});
-            pm4=uimenu(wm1,'Label','Phase / Energy Histogram','Callback',...
+            pm4=uimenu(wm1,'Label','P vs. x','Callback',...
+                {@px_plot,x,energy,plottitle,xchg});
+            pm5=uimenu(wm1,'Label','Phase / Energy Histogram','Callback',...
                 {@p_hist,phase,plottitle});
             
             %Generate the X X' plot
             xxpplot=subplot(2,2,1);
-                scatter(x,xp,3,xchg,'filled');
+                scatter(x,xp,1,xchg,'filled');
                 axis([xlim xplim]);
                 title('Horizontal Phase Space');
                 xlabel('X (cm)');
@@ -492,7 +501,7 @@ while ~feof(plotfile)
                 %plot(y,yp,'.','MarkerSize',3);
                 for j=1:nstates
                     chindex=find(ychg==chgvals(j));
-                    yyph(j)=scatter(y(chindex),yp(chindex),3,colors(j,:),'filled');
+                    yyph(j)=scatter(y(chindex),yp(chindex),1,colors(j,:),'filled');
                     hold on
                 end
                 if nstates>1
@@ -516,7 +525,7 @@ while ~feof(plotfile)
             %Generate the realspace plot, with profiles
             xyplot=subplot(2,2,3);
                 %plot(x,y,'r.','MarkerSize',3);
-                scatter(x,y,3,xchg,'filled');
+                scatter(x,y,1,xchg,'filled');
                 axis([xlim ylim]);
                 title('Real Space');
                 xlabel('X (cm)');
@@ -539,7 +548,7 @@ while ~feof(plotfile)
             %Generate the phase/energy plot
             teplot=subplot(2,2,4);
                 %plot(phase,energy,'r.','MarkerSize',3);
-                scatter(phase,energy,3,pechg,'filled');
+                scatter(phase,energy,1,pechg,'filled');
                 axis([plim elim]);
                 title('Longitudinal Phase Space');
                 xlabel('Time (ns)');
@@ -667,7 +676,7 @@ else
   y = sqrt(mean(x .* conj(x), dim));
 end
 
-function mouseclick_callback(gcbo, eventdata, varargin)
+function mouseclick_callback(gcbo, ~, varargin)
     origylim=get(gca,'ylim');
     origxlim=get(gca,'xlim');
     origywid=origylim(2)-origylim(1);
@@ -854,7 +863,7 @@ function write_cosy_distribution(gcbo, eventdata, x, xp, y, yp, phase, energy, f
     
     fclose(df);
     
-    function showdata(gcbo, eventdata, title)
+    function showdata(gcbo, ~, title)
         %Show corresponding data from dynac.short for an emittance plot
         
         %Open dynac.short
@@ -1089,9 +1098,9 @@ function write_cosy_distribution(gcbo, eventdata, x, xp, y, yp, phase, energy, f
         function ye_fig=ye_plot(~,~,y,energy,varargin)
             %Plot y vs energy
             ye_fig=figure('Name','Y vs. Energy');
-            if nargin==4
+            if nargin==4 %Single Charge State Beam
                 plot(y,energy,'r.','markersize',5);
-            else
+            else %Multiple Charge State Beam
                 ychg=varargin{1};
                 chgvals=unique(ychg);
                 nstates=length(chgvals);
@@ -1164,21 +1173,21 @@ function px_fig=px_plot(~,~,x,energy,plottitle,varargin)
             px_fig=figure('Name','Relative Momentum vs. X');
             
             if nargin==5 %Not a multi charge state beam
-                plot(x,dpp*100,'r.','markersize',5);
-                
+               % plot(x,dpp*100,'r.','markersize',5);
+                 scatter(x,dpp*100,'r.');
                 %Find fit line
-                fitcoeffs=polyfit(x,dpp,1); %Coeffs in %/cm and %
-                fitline=fitcoeffs(1).*x+fitcoeffs(2);
-                xint=fitcoeffs(2);
-                yint=-fitcoeffs(2)/fitcoeffs(1);
-                dispersion=.01*yint/xint; %Dispersion in meters
+                fitcoeffs=polyfit(dpp,x,1); %Coeffs in (dp/p)/cm and (dp/p)
+                dispersion=.01*fitcoeffs(1); %Dispersion function in meters (m /(dp/p))
                 disptext=sprintf(['Dispersion: %s m / (dp/p)\n'...
                     'R (4 RMS): %s '],...
                     num2str(dispersion),num2str(1/pwidthoverp));
+                lim=axis;
                 
                 %Plot line and caption
                 hold on;
-                plot(x,fitline*100, '-');
+                plot(x,100*(x-fitcoeffs(2))/fitcoeffs(1),'-');
+                %plot(x,fitcoeffs(1)*x/100,'-');
+                axis(lim);
                 xlim=get(gca,'xlim');
                 ylim=get(gca,'ylim');
                 text(xlim(2),ylim(2),disptext,'HorizontalAlignment','right',...
@@ -1186,25 +1195,37 @@ function px_fig=px_plot(~,~,x,energy,plottitle,varargin)
                 hold off;
                 
             else %This IS a multi charge state beam.
-                %Do nothing for now, fix this later.
-%                 xchg=varargin{1};
-%                 chgvals=unique(xchg);
-%                 nstates=length(chgvals);
-%                 colors=colormap(hsv(nstates));
-%                 for j=1:nstates
-%                     chindex=find(xchg==chgvals(j));
-%                     xen(j)=scatter(x(chindex),energy(chindex),5,colors(j,:),'filled');
-%                     hold on;
-%                 end
-%                 if nstates>1
-%                     leg=legend(strtrim(cellstr(num2str(chgvals'))'));
-%                     s1=get(leg,'Children');
-%                     s2=[];
-%                     s2=findobj(s1,{'type','patch','-or','type','line'});
-%                     for m=1:length(s2)
-%                         set(s2(m),'markersize',3);
-%                     end
-%                 end
+                 xchg=varargin{1};
+                 chgvals=unique(xchg);
+                 nstates=length(chgvals);
+                 colors=colormap(hsv(nstates));
+                 for j=1:nstates
+                     chindex=find(xchg==chgvals(j));
+                     xen(j)=scatter(x(chindex),dpp(chindex)*100,5,colors(j,:),'filled');
+                     hold on;
+                 end
+                 if nstates>1 %Create Legend
+                     leg=legend(strtrim(cellstr(num2str(chgvals'))'));
+                     s1=get(leg,'Children');
+                     s2=[];
+                     s2=findobj(s1,{'type','patch','-or','type','line'});
+                 end
+                 lim=axis;
+                 legtext=get(leg,'String');
+                 for j=1:nstates
+                     chindex=find(xchg==chgvals(j));
+                     fitcoeffs=polyfit(dpp(chindex),x(chindex),1);
+                     dispersion=.01*fitcoeffs(1); %Dispersion function in (m/(dp/p))
+                     legtext{j}=[legtext{j} ' D: ' num2str(dispersion) ' m'];
+                     plot(x(chindex),100*(x(chindex)-fitcoeffs(2))/fitcoeffs(1),'k-');
+                 end
+                 if nstates>1
+                     set(leg,'String',legtext);
+                     for m=1:length(s2)
+                         set(s2(m),'markersize',3);
+                     end
+                 end
+                 axis(lim)
             end
             title('X vs. Momentum');
             xlabel('X (cm)');

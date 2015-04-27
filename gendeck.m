@@ -59,12 +59,17 @@ function [settings,freqlist]=gendeck(outputfilename,settings,layoutfilename,devi
 %3/24/15 - Generating a deck with no errors returns a success message.
 %3/31/15 - Added unit tracking for multi charge state beams.
 %4/6/15 - Updated for new version of EDFLEC with arbitrary field settable
+%4/15/15 - Fixed a bug with electrostatic deflectors
+%4/22/15 - Made default number of sectors in benders 10, and moved
+%parameter to top of file
 
-clearerror;
+%-----Tweakable Parameters----% (Move to .ini file eventually)
 RFQreject=.5; %Fractional deviation from average energy to be rejected after RFQ. Note
               %that this is from the average INCLUDING the unaccelerated
-              %beam. Eventually add to .ini file.
+              %beam. 
+sectors=10; %Number of sectors to use for bending elements
 
+clearerror;
 runfreq=settings.RF; %Initial Frequency of line
 edflectype=checkedflec; %which version of electrostatic deflector to use
 freqlist=[];
@@ -247,7 +252,7 @@ while ~feof(layoutfile)
                 %field, since setting field to 0 makes it automatic.
             end
             fprintf(outfile,'%s\r\n','BMAGNET');
-            fprintf(outfile,'%s\r\n','1');
+            fprintf(outfile,'%s\r\n',num2str(sectors));
             fprintf(outfile,'%s %s %s %s %s\r\n',devices{id,1}{1,2},...
                 devices{id,1}{1,3},bfield,'0','0');
             fprintf(outfile,'%s %s %s %s %s\r\n',devices{id,1}{1,4},...
@@ -312,7 +317,7 @@ while ~feof(layoutfile)
         case 'EDFLEC' %Electrostatic Deflector
             id=find(strcmp(card{1,2},devicetypes));
             fprintf(outfile,'%s\r\n','EDFLEC');
-            fprintf(outfile,'%s\r\n','1');
+            fprintf(outfile,'%s\r\n',num2str(sectors));
             if edflectype==3 %Older versions with only three parameters
                 fprintf(outfile,'%s %s %s\r\n', devices{id,1}{1,2},...
                     devices{id,1}{1,3}, devices{id,1}{1,4});

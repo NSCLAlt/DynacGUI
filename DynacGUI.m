@@ -104,6 +104,7 @@ function varargout = DynacGUI(varargin)
 %             EDFLEC in r13. - 4/6/15
 %             - Fixed broken check for missing .ini file.
 %             - loadcs.m module added for importing control system data.
+%Version 4.1 - Vitally important semicolon. Oh, fine. Tiny OCD semicolon. 4/20/15
 %
 %       Wishlist:
 %         - Ability to run COSY decks
@@ -315,13 +316,13 @@ end
 %Set up "View Files" menu
 handles.filesmenu=uimenu(hObject,'Label','View Files');
 uimenu(handles.filesmenu,'Label','dynac.short','Callback',...
-    ['system(''' handles.texteditor 'dynac.short'')']);
+    ['system(''' handles.texteditor 'dynac.short'');']);
 uimenu(handles.filesmenu,'Label','dynac.long','Callback',...
-    ['system(''' handles.texteditor 'dynac.long'')']);
+    ['system(''' handles.texteditor 'dynac.long'');']);
 uimenu(handles.filesmenu,'Label','dynac.print','Callback',...
-    ['system(''' handles.texteditor 'dynac.print'')']);
+    ['system(''' handles.texteditor 'dynac.print'');']);
 uimenu(handles.filesmenu,'Label','emit.plot','Callback',...
-    ['system(''' handles.texteditor 'emit.plot'')']);
+    ['system(''' handles.texteditor 'emit.plot'');']);
 uimenu(handles.filesmenu,'Label','Current Layout File','Callback',...
     {@viewcurrent,'layout'},'Separator','on');
 uimenu(handles.filesmenu,'Label','Current Devices File','Callback',...
@@ -1828,6 +1829,7 @@ set(handles.generatedgraphs_listbox,'UserData',ud);
 %If gendeck encounters an RFQ, longdist will be reset to 0
 if handles.settings.longdist==1;
     disp('No RFQ Present!')%eventually, replace with running the deck
+    set(handles.runlongdist_button,'ForegroundColor',[0 0 0],'String','Gen/Run for t>tRFQ');
     return
 end
 

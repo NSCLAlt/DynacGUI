@@ -36,11 +36,16 @@ function varargout = DynacGUIFit(varargin)
 %               - Added executable selection menu. 
 %       4/1/15 - Fixed a bug where fitting statements on the last element
 %       before a manually selected stop points didn't work.
+%       4/21/15 - Dispersion function is now calculated directly from a particle
+%       distribution, not from the number reported in 'dynac.long'
+%                - Improved handling of "NaN" results from the fitting
+%                function
 %
-%
-%       To do:  set so the emitgr card is ONLY written when the fitting
-%       parameter is dispersion.  Is this possible?
+%       To Do:
 %           Grab executable choice from DynacGUI when called from there.
+%           Use at least two fitting parameters with selectable weights.
+%           Transfer result vector back to DynacGUI quickly. (Harder than it
+%               sounds, since non-tunable parameters can be used for fitting.)
 
 
 % Edit the above text to modify the response to help DynacGUIFit
@@ -93,12 +98,15 @@ handles.output = hObject;
 %   that's important.  So if 'out.steve' is actually the number of
 %   particles divided by the y beta function (why you'd want that is
 %   another question), you could add 'NParticles / Ybeta [mrad/mm]'.
+%   4. If your function will require the use of a dispersion function, add the
+%   short name to the array in handles.dstfunctions.
 
 matchlist={'alphax','betax','alphay','betay',...
     'alphaznskev','betaznskev','alphazdegkev','betazdegkev','dx','dxp','dy','dyp',...
     'dphi','dw','betarp','energyrp','tofrp','energycog','tofcog','eoffsetcog','toffsetcog',...
     'xcog','xpcog','ycog','ypcog','rxxp','ryyp','rphie','emitxnorm','emitxnon','emitynorm','emitynon',...
-    'emitznskev','emitzdegkev','particles','radius','dispersion','dispbeta'};
+    'emitznskev','emitzdegkev','particles','radius','xdisp','xdispoversqrtbetax',...
+    'alphasum','cogxoverdx','cogxminusdx'};
 matchnames={'X alpha',...
     'X beta [mm/mrad]',...
     'Y alpha',...
@@ -136,8 +144,14 @@ matchnames={'X alpha',...
     'Particles Remaining',...
     'Radius (dx^2+dy^2) [mm]',...
     'Dispersion',...
-    'Dispersion/Sqrt(betax)'};
+    'X Dispersion/Sqrt(betax)',...
+    'Alpha X + Alpha Y',...
+    'X C.O.G. / X FWHM',...
+    'X c.o.g. - X FWHM'};
     
+%List of fitting functions requiring a particle distribution computation
+handles.dstfunctions={'xdisp','xdispoversqrtbetax'};
+
 set(handles.matchpars_popup,'String',matchnames);
 set(handles.matchpars_popup,'UserData',matchlist);
 
@@ -368,6 +382,7 @@ else
     set(handles.min_editbox,'String','0');
     set(handles.max_editbox,'String','9999');
 end
+
 set(handles.addvar_button,'Enable','on'); %You CAN add a variable
 set(handles.endselect_button,'Enable','off'); %You can't define an endpoint
 
@@ -505,6 +520,15 @@ if ~isdir('dynacscratch')
 end
 sdir=['dynacscratch' filesep]; %location of scratch directory
 
+%Write particle file if fitting on parameter that needs it
+matchpars=get(handles.matchpars_popup,'UserData');
+matchval=get(handles.matchpars_popup,'Value');
+if  ismember(matchpars(matchval),handles.dstfunctions)
+    dstcard='WRBEAM\r\nend.dst\r\n1 2\r\n';
+else
+    dstcard=[];
+end
+
 %Retrieve independent variables and ending line
 selectedvars=get(handles.selectedvars_listbox,'String'); 
 endpoint=get(handles.endpoint_textbox,'String'); 
@@ -519,9 +543,6 @@ for i=1:length(selectedvars)
 end
 fitlines=vararray(:,1);
 fitcols=vararray(:,2);
-
-%Define EMITGR card for forcing dispersion reporting
-emitgr='EMITGR\r\nEnding Distribution\r\n1 4\r\n1 2 1 2 1 2 20 1\r\n';
 
 %Prepare to scan the input deck
 inputdeckname=get(handles.indeck_inputbox,'String');
@@ -584,7 +605,7 @@ while ~feof(inputdeck)
 
         cardbuffer=[inputline '\r\n']; %...then start a new buffer with this line.
         if regexp(cardbuffer,'^STOP') %Copes with terminal blank lines in input file
-            cardbuffer=[emitgr 'EMIT\r\n' cardbuffer]; %make sure there's a final emit card
+            cardbuffer=[dstcard 'EMIT\r\n' cardbuffer]; %make sure there's a final emit card
             break;
         elseif regexp(inputline,'^RFQPTQ|^FIELD|^FSOLE|^RDBEAM')
             fileflag=1; %Next line down the pipeline is a file name
@@ -609,7 +630,7 @@ while ~feof(inputdeck)
             cardbuffer=[';FIT' prefix '\r\n' cardbuffer]; %Prepend it to the buffer
             prefix=[]; %And then clear it.
         end
-        cardbuffer=[cardbuffer emitgr 'EMIT\r\nSTOP\r\n']; %Make the final cardbuffer
+        cardbuffer=[cardbuffer dstcard 'EMIT\r\nSTOP\r\n']; %Make the final cardbuffer
         break %Drop out of the while loop
     end
 end
@@ -645,17 +666,20 @@ end
 function solve_button_Callback(hObject, ~, handles)
 %Callback for the "solve" button.
 
-writefile(hObject, [])
-handles=guidata(hObject);
-set(handles.solve_button,'ForegroundColor',[1 0 0],'String','Running');
-
+%Starting Parameters
 sdir='dynacscratch';
-fitdeckname=handles.fitdeckname;
 matchpars=get(handles.matchpars_popup,'UserData');
 selectedpar=matchpars{get(handles.matchpars_popup,'Value')};
 
 %General Fitting Options
 options=optimoptions('fmincon','DiffMinChange',.1,'Display','Iter');
+
+set(handles.solve_button,'ForegroundColor',[1 0 0],'String','Running');
+
+%Write the modified file with ;FIT statements
+writefile(hObject, []);
+handles=guidata(hObject);
+fitdeckname=handles.fitdeckname;
 
 %Extract independent variable data from list box.
 selectedvars=get(handles.selectedvars_listbox,'String'); 
@@ -757,10 +781,9 @@ ud=get(guifig,'UserData');
 executable=ud{1};
 mingw=ud{2};
 
-
 %Returns selected output value for a given input deck and value of fit parameter
     datafile1='dynac.short';
-    datafile2='dynac.long';
+    datafile2='end.dst';
     outfile='temp.in';
     %Modify temporary deck with input values.
     result=moddeck(deckfile, outfile, values);
@@ -769,13 +792,13 @@ mingw=ud{2};
     end
     %Run dynac on the modified deck
     command=['"' executable '"' mingw ' ' outfile];
-    [a,b]=system(command);
+    [~,~]=system(command);
     %Scan dynac.short for the results
     out=getlastemit(datafile1,datafile2);
     if ~isempty(out)
         dynfunc=out.(output);
     else
-        dynfunc='NaN';
+        dynfunc=NaN;
     end
 
 function result=moddeck(deckfile, outfile, values)
@@ -853,22 +876,22 @@ fprintf(deck,newdeck);
 fclose(deck);
 result=0;
 
-function out=getlastemit(shortfilename,longfilename)
+function out=getlastemit(shortfilename,dispfilename)
 
-file=fopen(shortfilename);
-fseek(file,-648,'eof');
-line=fgetl(file);
+shortfile=fopen(shortfilename);
+fseek(shortfile,-648,'eof');
+line=fgetl(shortfile);
 
 while isempty(strfind(line,'beam'))
-    if feof(file)
+    if feof(shortfile)
         disp('Error: Emit Card Not Found')
-        fclose(file);
+        fclose(shortfile);
         out=[];
         return;
     end
-    line=fgetl(file);
+    line=fgetl(shortfile);
 end
-line=fgetl(file);
+line=fgetl(shortfile);
 C=strsplit(line,'\s*',...
     'DelimiterType','RegularExpression');
 out.betarp=str2double(C(2));
@@ -878,14 +901,14 @@ out.energycog=str2double(C(5));
 out.tofcog=str2double(C(6));
 out.eoffsetcog=str2double(C(7));
 out.toffsetcog=str2double(C(8));
-line=fgetl(file);
+line=fgetl(shortfile);
 C=strsplit(line,'\s*',...
     'DelimiterType','RegularExpression');
 out.xcog=str2double(C(2));
 out.xpcog=str2double(C(3));
 out.ycog=str2double(C(4));
 out.ypcog=str2double(C(5));
-line=fgetl(file);
+line=fgetl(shortfile);
 C=strsplit(line,'\s*',...
     'DelimiterType','RegularExpression');
 out.alphax=str2double(C(2));
@@ -894,14 +917,14 @@ out.alphay=str2double(C(4));
 out.betay=str2double(C(5));
 out.alphaznskev=str2double(C(6));
 out.betaznskev=str2double(C(7));
-line=fgetl(file);
+line=fgetl(shortfile);
 C=strsplit(line,'\s*',...
     'DelimiterType','RegularExpression');
 out.alphazdegkev=str2double(C(2));
 out.betazdegkev=str2double(C(3));
 out.emitzdegkev=str2double(C(4));
 out.freq=str2double(C(6));
-line=fgetl(file);
+line=fgetl(shortfile);
 C=strsplit(line,'\s*',...
     'DelimiterType','RegularExpression');
 out.dphi=str2double(C(2));
@@ -909,7 +932,7 @@ out.dw=str2double(C(3));
 out.rphie=str2double(C(4));
 out.emitznskev=str2double(C(5));
 out.particles=str2double(C(7));
-line=fgetl(file);
+line=fgetl(shortfile);
 C=strsplit(line,'\s*',...
     'DelimiterType','RegularExpression');
 out.dx=str2double(C(2));
@@ -917,7 +940,7 @@ out.dxp=str2double(C(3));
 out.rxxp=str2double(C(4));
 out.emitxnorm=str2double(C(5));
 out.emitxnon=str2double(C(8));
-line=fgetl(file);
+line=fgetl(shortfile);
 C=strsplit(line,'\s*',...
     'DelimiterType','RegularExpression');
 out.dy=str2double(C(2));
@@ -925,25 +948,59 @@ out.dyp=str2double(C(3));
 out.ryyp=str2double(C(4));
 out.emitynorm=str2double(C(5));
 out.emitynon=str2double(C(8));
-line=fgetl(file);
-line=fgetl(file);
-out.runtime=fgetl(file);
+line=fgetl(shortfile);
+line=fgetl(shortfile);
+out.runtime=fgetl(shortfile);
 
-fclose(file);
+fclose(shortfile);
+
+%---Parameters NOT read from dynac.short---%
+out.gammarp=1/sqrt(1-out.betarp^2);
+out.momentumrp=out.energyrp*(out.betarp*out.gammarp/(out.gammarp-1)); %in MeV/c
 
 
- file=fopen(longfilename);
- fseek(file,-420,'eof');
- line=fgetl(file);
- token=regexp(line,':  (\S*)','tokens');
- out.dispersion=str2double(token{1});
- fclose(file);
+%If 'dispersion' is selected, read in distribution file
+handles=guidata(gcbf);
+matchpars=get(handles.matchpars_popup,'UserData');
+matchval=get(handles.matchpars_popup,'Value');
+if  ismember(matchpars(matchval),handles.dstfunctions)
+  %Compute dispersion function
+    dispfile=fopen(dispfilename);
+    particles=dlmread(dispfilename,'',1,0); 
+    fclose(dispfile);
+    x=particles(:,1); %x in cm
+    energy=particles(:,6); %Energy in MeV
+    momentum=energy*(out.betarp*out.gammarp/(out.gammarp-1)); %Momentum in MeV/c
+    dpp=momentum/out.momentumrp;
+    fitcoeffs=polyfit(dpp,x,1); %Coeffs in (dp/p)/cm and (dp/p)
+    out.xdisp=.01*fitcoeffs(1); %Dispersion function in m/(dp/p) 
+end
+
+
+%Outdated code - reads dispersion dp/p from dynac.long, but not the
+%dispersion function (dp/p) / x, which is what is needed.
+%  file=fopen(longfilename);
+%  fseek(file,-420,'eof');
+%  line=fgetl(file);
+%  token=regexp(line,':  (\S*)','tokens');
+%  out.dispersion=str2double(token{1});
+%  fclose(file);
 
 %---Custom fitting parameters---%
 %Rather than running dynac twice or more (computationally expensive), define
 %compound fitting parameters here, and then add them to the list of options
 %near the top of this file. Be sure to name your new parameter
 %'out.[parameter name]', using the 'out.radius' example below.
+%
 
 out.radius=sqrt(out.dx^2+out.dy^2);
-out.dispbeta=out.dispersion/sqrt(out.betax);
+out.alphasum=out.alphax+out.alphay;
+out.cogxoverdx=abs(out.xcog)/out.dx;
+out.cogxminusdx=abs(out.xcog)-out.dx;
+
+%If your function uses dispersion or another input parameter that requires
+%a particle distribution to be output, add it within this "if" statement.
+if  ismember(matchpars(matchval),handles.dstfunctions)
+    out.xdispoversqrtbetax=abs(out.xdisp)/sqrt(out.betax);
+end
+
