@@ -62,16 +62,40 @@ function [settings,freqlist]=gendeck(outputfilename,settings,layoutfilename,devi
 %4/15/15 - Fixed a bug with electrostatic deflectors
 %4/22/15 - Made default number of sectors in benders 10, and moved
 %parameter to top of file
+%4/29/15 - Checking for correct number of sectors and space charge type for
+%multi-charge state beam
+%        - Now reading default values for sectors and RFQreject from .ini
+%        file
 
-%-----Tweakable Parameters----% (Move to .ini file eventually)
+%-----Default Parameters----% (Move to .ini file eventually)
 RFQreject=.5; %Fractional deviation from average energy to be rejected after RFQ. Note
               %that this is from the average INCLUDING the unaccelerated
               %beam. 
-sectors=10; %Number of sectors to use for bending elements
+esectors=10; %Number of sectors for electrostatic bending elements
+bsectors=10; %Number of sectors for magnetic bending elements
+%Default REJECT values
+%Energy[MeV] Phase[deg] X[cm] Y[cm] R[cm] - All are 1/2 widths
+reject=[1000 4000 100 100 400];
 
-clearerror;
+%Define DynacGUI Window, get handles
+figtag = 'DynacGUI';
+guifig = findobj(allchild(0),'flat','Tag',figtag);
+guihand = guidata(guifig);
+
+%Adjust parameters from .ini file
+if isfield(guihand.inivals,'RFQreject')
+    RFQreject=guihand.inivals.RFQreject;
+end
+if isfield(guihand.inivals,'Esectors')
+    esectors=guihand.inivals.Esectors;
+end
+if isfield(guihand.inivals,'Bsectors')
+    bsectors=guihand.inivals.Bsectors;
+end
+
+clearerror(guihand);
 runfreq=settings.RF; %Initial Frequency of line
-edflectype=checkedflec; %which version of electrostatic deflector to use
+edflectype=checkedflec(guihand); %which version of electrostatic deflector to use
 freqlist=[];
 unitstruct=structfun(@(x)([]),settings,'UniformOutput',0);
 unitstruct.A='[AMU]';
@@ -84,9 +108,7 @@ unitstruct.Epsy='[mm.mrad]';
 unitstruct.Deltae='[MV]';
 unitstruct.Energy='[MV]';
 
-%Default REJECT values
-%Energy[MeV] Phase[deg] X[cm] Y[cm] R[cm] - All are 1/2 widths
-reject=[1000 4000 100 100 400];
+
 errorflag=0; %This flag is set if an error is reported.
 
 %Scan device file for device parameters
@@ -225,6 +247,13 @@ else
                             disperror('Missing Charge State Data');
                         end
                     end
+                    %Adjust number of deflector sectors, if needed
+                    if esectors == 1;
+                        esectors=2;
+                    end
+                    if bsectors ==1;
+                        bsectors=2;
+                    end
             end
     end
 end
@@ -252,7 +281,7 @@ while ~feof(layoutfile)
                 %field, since setting field to 0 makes it automatic.
             end
             fprintf(outfile,'%s\r\n','BMAGNET');
-            fprintf(outfile,'%s\r\n',num2str(sectors));
+            fprintf(outfile,'%s\r\n',num2str(bsectors));
             fprintf(outfile,'%s %s %s %s %s\r\n',devices{id,1}{1,2},...
                 devices{id,1}{1,3},bfield,'0','0');
             fprintf(outfile,'%s %s %s %s %s\r\n',devices{id,1}{1,4},...
@@ -317,7 +346,7 @@ while ~feof(layoutfile)
         case 'EDFLEC' %Electrostatic Deflector
             id=find(strcmp(card{1,2},devicetypes));
             fprintf(outfile,'%s\r\n','EDFLEC');
-            fprintf(outfile,'%s\r\n',num2str(sectors));
+            fprintf(outfile,'%s\r\n',num2str(esectors));
             if edflectype==3 %Older versions with only three parameters
                 fprintf(outfile,'%s %s %s\r\n', devices{id,1}{1,2},...
                     devices{id,1}{1,3}, devices{id,1}{1,4});
@@ -501,10 +530,14 @@ while ~feof(layoutfile)
                 disperror(['Error: Missing tune setting for ' card{1,3}],1);
                 continue
             end
+            if exist('nstates','var') && ~strcmp(sctype,'3')
+                disperror(['Error: Space charge modes other than SCHEFF not '...
+                    'supported for multi-charge state beam']);
+            end
             fprintf(outfile,'%s\r\n','SCDYNAC');
             fprintf(outfile,'%s\r\n',sctype);
             fprintf(outfile,'%g %s\r\n',settings.(card{1,3}),devices{id,1}{1,3});
-            switch sctype %Consult Dynac docs for mor info
+            switch sctype %Consult Dynac docs for more info
                 case '1' %HERSC - Hermite series, default value
                     fprintf(outfile,'%s\r\n',devices{id,1}{1,4});
                 case '-1' %HERSC - Hermite series, specified parameters
@@ -525,6 +558,9 @@ while ~feof(layoutfile)
                         devices{id,1}{1,9},devices{id,1}{1,10},...
                         devices{id,1}{1,11});
                     end
+            end
+            if mod(bsectors,2)~=0 %make sure number of bsectors is even
+                bsectors=bsectors+1;
             end
         case 'SCDYNEL' %Space charge computation in bending magnets
             fprintf(outfile,'%s\r\n','SCDYNEL');
@@ -607,9 +643,6 @@ fprintf(outfile,'%s\r\n','STOP');
 errorflag=0;
 
 %Store unit list in user data field of edit tune button.
-figtag='DynacGUI';
-guifig=findobj(allchild(0),'flat','Tag',figtag);
-guihand=guidata(guifig);
 set(guihand.showsettings_button,'UserData',unitstruct);
 if isempty(get(guihand.dynac_output_textbox,'String'))
     disperror(['Deck generated successfully at ' datestr(now)]);
@@ -630,19 +663,12 @@ elseif varargin{1}==1
     set(guihand.dynac_output_textbox,'String',errortext);
 end
 
-function clearerror
-figtag = 'DynacGUI';
-guifig = findobj(allchild(0), 'flat','Tag', figtag);
-guihand = guidata(guifig);
+function clearerror(guihand)
 set(guihand.dynac_output_textbox,'String',{});
 
-function out=checkedflec
-figtag = 'DynacGUI';
-guifig = findobj(allchild(0),'flat','Tag',figtag);
-guihand = guidata(guifig);
+function out=checkedflec(guihand)
 if isfield(guihand.inivals,'Edflec')
     out=str2num(guihand.inivals.Edflec);
-    return
 else
     out=4;
 end

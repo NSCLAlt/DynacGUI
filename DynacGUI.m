@@ -145,7 +145,7 @@ function DynacGUI_OpeningFcn(hObject, eventdata, handles, varargin)
 handles.output = hObject;
 
 %VERSION NUMBER
-handles.dgversion='4.0';
+handles.dgversion='4.1';
 
 %Check for open window and refuse to fire again if there is one.
 figtag = 'DynacGUI';
