@@ -68,7 +68,7 @@ function [settings,freqlist]=gendeck(outputfilename,settings,layoutfilename,devi
 %        file
 
 %-----Default Parameters----% (Move to .ini file eventually)
-RFQreject=.5; %Fractional deviation from average energy to be rejected after RFQ. Note
+RFQreject=0.5; %Fractional deviation from average energy to be rejected after RFQ. Note
               %that this is from the average INCLUDING the unaccelerated
               %beam. 
 esectors=10; %Number of sectors for electrostatic bending elements
@@ -84,13 +84,13 @@ guihand = guidata(guifig);
 
 %Adjust parameters from .ini file
 if isfield(guihand.inivals,'RFQreject')
-    RFQreject=guihand.inivals.RFQreject;
+    RFQreject=str2double(guihand.inivals.RFQreject);
 end
 if isfield(guihand.inivals,'Esectors')
-    esectors=guihand.inivals.Esectors;
+    esectors=str2double(guihand.inivals.Esectors);
 end
 if isfield(guihand.inivals,'Bsectors')
-    bsectors=guihand.inivals.Bsectors;
+    bsectors=str2double(guihand.inivals.Bsectors);
 end
 
 clearerror(guihand);
