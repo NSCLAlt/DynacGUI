@@ -43,7 +43,13 @@ while ~feof(layoutfile)
     card=regexp(line,'\t','split');
     switch card{1,1}
         case 'BMAGNET' %Bending Magnet
-            %Do nothing - Bend magnets are purely geometric in Dynac
+            %Rescale bending magnet.  Note: automatic fields remain
+            %automatic. If there is no parameter in the layout file, or it
+            %is missing in the tune file, field cannot be scaled.
+            if (length(card)>=3) && isfield(settings,card{1,3}) && ~isempty(settings.(card{1,3}))
+                %If there is a third parameter, scale the field
+                settings.(card{1,3})=settings.(card{1,3})*bscale; 
+            end
         case 'BUNCHER' %Buncher
             %Rescale buncher voltage
             settings.(card{1,4})=settings.(card{1,4})*escale;
@@ -53,7 +59,17 @@ while ~feof(layoutfile)
         case 'DRIFT' %Drift space
             %Do nothing
         case 'EDFLEC' %Electrostatic Deflector
-            %Do nothing - deflectors are purely geometric in Dynac
+            %Cannot rescale electrostatic deflectors that do not have a
+            %parameter defined, or where the parameter is not present in
+            %the tune file.
+            if length(card)==2
+            %If there is no field parameter name in the layout file, do nothing.
+            elseif isfield(settings,(card{1,3})) && ~isempty(settings.(card{1,3}))
+                %If the field is present and not empty, scale the efield
+                settings.(card{1,3})=settings.(card{1,3})*cavscale;
+            else %Otherwise use nominal value
+                efield=-1;
+            end
         case 'EMIT' %Dump beam data to dynac.short
             %Do nothing
         case 'EMITGR' %Emittance Plot

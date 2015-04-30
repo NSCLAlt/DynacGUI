@@ -105,6 +105,9 @@ function varargout = DynacGUI(varargin)
 %             - Fixed broken check for missing .ini file.
 %             - loadcs.m module added for importing control system data.
 %Version 4.1 - Vitally important semicolon. Oh, fine. Tiny OCD semicolon. 4/20/15
+%            - Added current output deck to view files menu 4/29/15
+%            - Made cavity scaling factor visible in rescale tune box
+%            4/30/15
 %
 %       Wishlist:
 %         - Ability to run COSY decks
@@ -329,6 +332,8 @@ uimenu(handles.filesmenu,'Label','Current Devices File','Callback',...
     {@viewcurrent,'devices'});
 uimenu(handles.filesmenu,'Label','Current Tune File','Callback',...
     {@viewcurrent,'tune'});
+uimenu(handles.filesmenu,'Label','Current Output Deck','Callback',...
+    {@viewcurrent,'deck'},'Separator','on');
 
 guidata(hObject,handles);
 end
@@ -342,6 +347,8 @@ switch type
         filename=get(handles.devicefile_inputbox,'String');
     case 'tune'
         filename=get(handles.settingsfile_inputbox,'String');
+    case 'deck'
+        filename=get(handles.outputdeck_inputbox,'String');
     otherwise
         return
 end
@@ -467,10 +474,14 @@ function scaled_tune(hObject,~)
         'String','E:','Position',[400 100 50 20]);
     uicontrol('Style','Text','HorizontalAlignment','Right',...
         'String','B:','Position',[400 80 50 20]);
+    uicontrol('Style','Text','HorizontalAlignment','Right',...
+        'String','Cav:','Position',[400 60 50 20]);
     escalebox=uicontrol('Style','Text','HorizontalAlignment','Left',...
         'String',num2str(escale,3),'Position',[460 100 50 20]);
     bscalebox=uicontrol('Style','Text','HorizontalAlignment','Left',...
         'String',num2str(bscale,3),'Position',[460 80 50 20]);
+    cavscalebox=uicontrol('Style','Text','HorizontalAlignment','Left',...
+        'String',num2str(cavscale,3),'Position',[460 60 50 20]);
     uicontrol('style','pushbutton','FontSize',10,...
         'String','Rescale Tune','Position',[20 20 100 20],...
         'Callback',{@rescale_button_callback,hobj});
@@ -520,6 +531,7 @@ function scaled_tune(hObject,~)
         cavscale=escale*(finale/finala)*(initiala/initiale); %Cavity Amplitude
         set(escalebox,'String',num2str(escale,3));
         set(bscalebox,'String',num2str(bscale,3));
+        set(cavscalebox,'String',num2str(cavscale,3));
     end
 end
 
