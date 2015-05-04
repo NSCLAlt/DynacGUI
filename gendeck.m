@@ -621,10 +621,7 @@ while ~feof(layoutfile)
         case 'STOP' %Break layout here
             %Useful if you want to temporarily comment out part of a
             %beamline
-            fprintf(outfile,'%s\r\n','EMIT'); %Always end with an EMIT card
-            fprintf(outfile,'%s\r\n','STOP');
-            fclose all;
-            return
+            break
         case 'WRBEAM' %Write beam file
             fprintf(outfile,'%s\r\n','WRBEAM');
             fprintf(outfile,'%s\r\n',card{1,2});

@@ -982,7 +982,7 @@ set(hc,'EliminateEmptySpace','off')
 
 %populate list with tune settings
 for i=1:nfields; 
-    if exist('unitstruct')
+    if exist('unitstruct') 
         label=[fields{i} ' ' unitstruct.(fields{i})];
     else
         label=fields(i);

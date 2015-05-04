@@ -69,9 +69,9 @@ function varargout=emitplot(freqlist,varargin)
 %4/23/15 - Dispersion Plot for multi-charge state beam
 %4/24/15 - Fixed serious error in dispersion fitting.
 %4/27/15 - This time I think the dispersion is actually correct.
+%5/4/15  - Now properly closes the emit.plot file.
+%        - Fixed weird bug in multicharge state plot.
 
-%To Do - add dispersion labels to multi-charge state p vs. x plot
-%      - check RESULTS for multi charge state plot
 
 if (nargin>=4)
     epfilename=[varargin{3} filesep 'emit.plot'];
@@ -273,10 +273,12 @@ while ~feof(plotfile)
                 hold off;
             suptitle(plottitle);
             if (nargin>=2) 
+                fclose(plotfile);
                 return 
             end;
         case 2; %Profile Graph
             disp('Error: Profile Graph not yet implimented')
+            fclose(plotfile);
             return;
         case 3; %XY Envelope Plot
             plottitle=strtrim(fgetl(plotfile));
@@ -305,6 +307,7 @@ while ~feof(plotfile)
                 xlabel('Z position(m)');
                 ylabel('4 RMS half width (cm)');
             if (nargin>=2) 
+                fclose(plotfile);
                 return 
             end;
         case 4; %dW/W Envelope Plot
@@ -335,6 +338,7 @@ while ~feof(plotfile)
             hold on
             plot([0,str2double(limits(2))],[0,0],':k','LineWidth',.1);
             if (nargin>=2) 
+                fclose(plotfile);
                 return 
             end;
         case 5; %dPhi Envelope Plot
@@ -365,6 +369,7 @@ while ~feof(plotfile)
             hold on
             plot([0,str2double(limits(2))],[0,0],':k','LineWidth',.1);
             if (nargin>=2) 
+                fclose(plotfile);
                 return 
             end;
         case 6; %Multi-Charge State Plot
@@ -442,7 +447,7 @@ while ~feof(plotfile)
                 pe=strsplit(strtrim(linein));
                 phase(i)=str2double(pe{1});
                 energy(i)=str2double(pe{2});
-                pechg(i)=str2double(pe{2});
+                pechg(i)=str2double(pe{3});
             end
             
             %Generate the figure
@@ -569,6 +574,7 @@ while ~feof(plotfile)
                 hold off;
             suptitle(plottitle);
             if (nargin>=2) 
+                fclose(plotfile);
                 return 
             end;
     end
