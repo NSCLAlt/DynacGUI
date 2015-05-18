@@ -110,12 +110,16 @@ function varargout = DynacGUI(varargin)
 %            4/30/15
 %            - Added X, Y, time, and delta E / E envelopes to z-axis plots.
 %            (Thanks, Eugene!) - 5/1/15
+%            - Made plot type list in Z axis box dynamic depending on Dynac
+%            version
+%            - Added 'DynacGUI' to view files menu.
 %
 %       Wishlist:
 %         - Ability to run COSY decks
 %         - Programmatically deterimine box location lines (DONE)
 %               -Do this for EMITL, not just EMITGR cards
 %         - Make "Edit Tune Settings" box well behaved under resizing.
+%
 
 % Last Modified by GUIDE v2.5 29-Jul-2014 11:48:56
 
@@ -336,6 +340,9 @@ uimenu(handles.filesmenu,'Label','Current Tune File','Callback',...
     {@viewcurrent,'tune'});
 uimenu(handles.filesmenu,'Label','Current Output Deck','Callback',...
     {@viewcurrent,'deck'},'Separator','on');
+uimenu(handles.filesmenu,'Label','DynacGUI.ini','Callback',...
+    ['system(''' handles.texteditor 'DynacGUI.ini'');'],...
+    'Separator','on');
 
 guidata(hObject,handles);
 end
@@ -1433,17 +1440,33 @@ function zplots_button_Callback(~, ~, handles) %#ok<DEFNU>
     espread=100*(maxdeltae./zdata.data(:,9)); %Energy spread as a percentage
     espreadline=plot(transaxes,zdata.data(:,1),espread,'Color','k');
     set(espreadline,'Visible','off');
-    
+        
     else %Trap old versions of Dynac with less data in "dynac.print"
+        nlines=4;
         nullline=zeros(length(zdata.data(:,1)));
-        xenvelopeline1=plot(transaxes,zdata.data(:,1),nulline,'Color','k');
-        xenvelopeline2=plot(transaxes,zdata.data(:,1),nulline,'Color','k');
-        yenvelopeline1=plot(transaxes,zdata.data(:,1),nulline,'Color','k');
-        yenvelopeline2=plot(transaxes,zdata.data(:,1),nulline,'Color','k');
+        xenvelopeline1=plot(transaxes,zdata.data(:,1),nullline,'Color','k');
+        xenvelopeline2=plot(transaxes,zdata.data(:,1),nullline,'Color','k');
+        yenvelopeline1=plot(transaxes,zdata.data(:,1),nullline,'Color','k');
+        yenvelopeline2=plot(transaxes,zdata.data(:,1),nullline,'Color','k');
         tspreadline=plot(transaxes,zdata.data(:,1),nullline,'Color','k');
         espreadline=plot(transaxes,zdata.data(:,1),nullline,'Color','k');
     end
         
+    %Plot Dispersion
+    if (size(zdata.data,2)>=21) %Only works with beta version that includes D
+        hold on;
+        xdispline=plot(transaxes,zdata.data(:,1),zdata.data(:,21),'Color','r');
+        ydispline=plot(transaxes,zdata.data(:,1),zdata.data(:,22),'Color','g');
+        set(xdispline,'Visible','off');      
+        set(ydispline,'Visible','off');
+        nlines=10;
+    else %Fail gracefully
+        nlines=8;
+        nullline=zeros(length(zdata.data(:,1)));
+        xdispline=plot(transaxes,zdata.data(:,1),nullline,'Color','r');
+        ydispline=plot(transaxes,zdata.data(:,1),nullline,'Color','g');
+    end
+    
     %Plot energy on 2nd axis
     energyaxes=axes('Position',get(transaxes,'Position'),...
         'XaxisLocation','bottom','YAxisLocation','right',...
@@ -1609,11 +1632,23 @@ function zplots_button_Callback(~, ~, handles) %#ok<DEFNU>
 %        'Position',[960 20 200 30],'BackgroundColor',backgroundcolor,...
 %        'FontSize',12,'Max',1,'Value',0,'callback',@toggle_beta);
 %    toggle_beta;
+
+    if nlines==10
+        zplotnames={'X/Y Profile',...
+        'X/Y Emittance','Z Emittance','X/Y Beta Functions','X Envelope',...
+        'Y Envelope','Time Spread','Energy Spread','X Dispersion','Y Dispersion',...
+        'None'};
+    elseif nlines==8
+        zplotnames={'X/Y Profile',...
+        'X/Y Emittance','Z Emittance','X/Y Beta Functions','X Envelope',...
+        'Y Envelope','Time Spread','Energy Spread','None'};
+    else
+        zplotnames={'X/Y Profile','X/Y Emittance','Z Emittance',...
+            'X/Y Beta Functions','None'};
+    end
     
     uicontrol(plot_window,...
-        'Style','popupmenu','String',{'X/Y Profile',...
-        'X/Y Emittance','Z Emittance','X/Y Beta Functions','X Envelope',...
-        'Y Envelope','Time Spread','Energy Spread','None'},...
+        'Style','popupmenu','String',zplotnames,...
         'Position',[20 20 200 30],'BackgroundColor','white',...
         'FontSize',12,'Value',1,'callback',@dropdown_callback);
     
@@ -1639,6 +1674,9 @@ function zplots_button_Callback(~, ~, handles) %#ok<DEFNU>
     
     function dropdown_callback(src,~)
         graphtype=get(src,'Value');
+        if graphtype>nlines
+            graphtype=99;
+        end
         yaxislabel=get(transaxes,'ylabel');
         set(xline,'Visible','off')
         set(yline,'Visible','off')
@@ -1653,39 +1691,49 @@ function zplots_button_Callback(~, ~, handles) %#ok<DEFNU>
         set(yenvelopeline2,'Visible','off');
         set(tspreadline,'Visible','off');
         set(espreadline,'Visible','off');
+        set(xdispline,'Visible','off');
+        set(ydispline,'Visible','off');
+        set(transaxes,'YTickMode','auto')
         switch graphtype
             case 1 %X/Y Envelope Plot
                 set(xline,'Visible','on');
                 set(yline,'Visible','on');
-                set(yaxislabel,'String','RMS Width (mm)');
+                set(yaxislabel,'String','RMS Width [mm]');
             case 2 %X/Y Emittance Plot
                 set(xemitline,'Visible','on');
                 set(yemitline,'Visible','on');
                 set(yaxislabel,'String',...
-                    'X/Y Emittance (mm.mrad - 1 RMS Normalized)')
+                    'X/Y Emittance [mm.mrad - 1 RMS Normalized]')
             case 3 %Z Emittance Plot
                 set(zemitline,'Visible','on');
-                set(yaxislabel,'String','Z Emittance (keV.ns - 4 RMS)')
+                set(yaxislabel,'String','Z Emittance [keV.ns - 4 RMS]')
             case 4 %Beta Function Plot
                 set(xbetaline,'Visible','on');
                 set(ybetaline,'Visible','on');
-                set(yaxislabel,'String','X/Y Beta Function (mm/mrad)');
+                set(yaxislabel,'String','X/Y Beta Function [mm/mrad]');
             case 5 % X Envelope Plot
                 set(xenvelopeline1,'Visible','on');
                 set(xenvelopeline2,'Visible','on');
-                set(yaxislabel,'String','X Envelope (mm)');
+                set(yaxislabel,'String','X Envelope [mm]');
             case 6 % Y Envelope Plot
                 set(yenvelopeline1,'Visible','on');
                 set(yenvelopeline2,'Visible','on');
-                set(yaxislabel,'String','Y Envelope (mm)');                
+                set(yaxislabel,'String','Y Envelope [mm]');                
             case 7 % Time Spread
                 set(tspreadline,'Visible','on');
-                set(yaxislabel,'String','Time Spread (ns)');
+                set(yaxislabel,'String','Time Spread [ns]');
             case 8 % Energy Spread
                 set(espreadline,'Visible','on');
-                set(yaxislabel,'String','Delta E / E (%)');
-            case 9 %None of the above
+                set(yaxislabel,'String','Delta E / E [%]');
+            case 9 % X Dispersion
+                set(xdispline,'Visible','on');
+                set(yaxislabel,'String','x / (dp / p) [m]');
+            case 10
+                set(ydispline,'Visible','on');
+                set(yaxislabel,'String','y / (dp / p) [m]'); 
+            case 99 %None of the above
                 set(yaxislabel,'String','');
+                set(transaxes,'Ytick',[]);
         end
     end
     function toggle_energy(~,~)

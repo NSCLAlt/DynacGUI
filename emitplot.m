@@ -71,7 +71,7 @@ function varargout=emitplot(freqlist,varargin)
 %4/27/15 - This time I think the dispersion is actually correct.
 %5/4/15  - Now properly closes the emit.plot file.
 %        - Fixed weird bug in multicharge state plot.
-
+%5/18/15 - Corrected dispersion function for right versin of dp.
 
 if (nargin>=4)
     epfilename=[varargin{3} filesep 'emit.plot'];
@@ -1134,7 +1134,7 @@ function write_cosy_distribution(gcbo, eventdata, x, xp, y, yp, phase, energy, f
 function px_fig=px_plot(~,~,x,energy,plottitle,varargin)
         %Plot x vs Momentum
             
-        %Get beta from dynac.short
+        %Get info from dynac.short
         %Open dynac.short
         try
             dsfile=fopen('dynac.short');
@@ -1172,8 +1172,8 @@ function px_fig=px_plot(~,~,x,energy,plottitle,varargin)
         
         gamma=1/sqrt(1-beta^2);
         momentumrp=energyrp*(beta*gamma/(gamma-1)); %in MeV/c
-        momentum=energy*(beta*gamma/(gamma-1));
-        pwidth=str2double(dw)*(beta*gamma/(gamma-1))*.001; %(dw is in keV)
+        momentum=energy/beta; % This is actually dp = dW / beta
+        pwidth=str2double(dw) / beta; %(dw is in keV)
         pwidthoverp=pwidth/momentumrp;
         dpp=momentum/momentumrp;
             px_fig=figure('Name','Relative Momentum vs. X');
@@ -1183,7 +1183,8 @@ function px_fig=px_plot(~,~,x,energy,plottitle,varargin)
                  scatter(x,dpp*100,'r.');
                 %Find fit line
                 fitcoeffs=polyfit(dpp,x,1); %Coeffs in (dp/p)/cm and (dp/p)
-                dispersion=.01*fitcoeffs(1); %Dispersion function in meters (m /(dp/p))
+                dispersion=.01*mean(x.*dpp)/mean(dpp.*dpp); 
+                        %Dispersion function in meters (m /(dp/p))
                 disptext=sprintf(['Dispersion: %s m / (dp/p)\n'...
                     'R (4 RMS): %s '],...
                     num2str(dispersion),num2str(1/pwidthoverp));
@@ -1191,7 +1192,7 @@ function px_fig=px_plot(~,~,x,energy,plottitle,varargin)
                 
                 %Plot line and caption
                 hold on;
-                plot(x,100*(x-fitcoeffs(2))/fitcoeffs(1),'-');
+                plot(x,100*(x-fitcoeffs(2))/fitcoeffs(1),'-'); %Factor of 100 for %
                 %plot(x,fitcoeffs(1)*x/100,'-');
                 axis(lim);
                 xlim=get(gca,'xlim');
@@ -1221,7 +1222,8 @@ function px_fig=px_plot(~,~,x,energy,plottitle,varargin)
                  for j=1:nstates
                      chindex=find(xchg==chgvals(j));
                      fitcoeffs=polyfit(dpp(chindex),x(chindex),1);
-                     dispersion=.01*fitcoeffs(1); %Dispersion function in (m/(dp/p))
+                     dispersion=0.01*mean(x.*dpp)/mean(dpp.*dpp);
+                            %Dispersion function in (m/(dp/p))
                      legtext{j}=[legtext{j} ' D: ' num2str(dispersion) ' m'];
                      plot(x(chindex),100*(x(chindex)-fitcoeffs(2))/fitcoeffs(1),'k-');
                  end

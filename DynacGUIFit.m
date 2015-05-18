@@ -40,6 +40,7 @@ function varargout = DynacGUIFit(varargin)
 %       distribution, not from the number reported in 'dynac.long'
 %                - Improved handling of "NaN" results from the fitting
 %                function
+%       5/18/15 - Updated dispersion function to correct dp vs p confusion.
 %
 %       To Do:
 %           Grab executable choice from DynacGUI when called from there.
@@ -970,21 +971,11 @@ if  ismember(matchpars(matchval),handles.dstfunctions)
     fclose(dispfile);
     x=particles(:,1); %x in cm
     energy=particles(:,6); %Energy in MeV
-    momentum=energy*(out.betarp*out.gammarp/(out.gammarp-1)); %Momentum in MeV/c
+    momentum=energy/out.betarp; %dp = dW / beta in MeV/c
     dpp=momentum/out.momentumrp;
-    fitcoeffs=polyfit(dpp,x,1); %Coeffs in (dp/p)/cm and (dp/p)
-    out.xdisp=.01*fitcoeffs(1); %Dispersion function in m/(dp/p) 
+    out.xdisp = 0.01 * mean(x.*dpp)/mean(dpp.*dpp); %Dispersion function in m/(dp/p) 
 end
 
-
-%Outdated code - reads dispersion dp/p from dynac.long, but not the
-%dispersion function (dp/p) / x, which is what is needed.
-%  file=fopen(longfilename);
-%  fseek(file,-420,'eof');
-%  line=fgetl(file);
-%  token=regexp(line,':  (\S*)','tokens');
-%  out.dispersion=str2double(token{1});
-%  fclose(file);
 
 %---Custom fitting parameters---%
 %Rather than running dynac twice or more (computationally expensive), define
