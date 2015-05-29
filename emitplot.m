@@ -71,7 +71,14 @@ function varargout=emitplot(freqlist,varargin)
 %4/27/15 - This time I think the dispersion is actually correct.
 %5/4/15  - Now properly closes the emit.plot file.
 %        - Fixed weird bug in multicharge state plot.
-%5/18/15 - Corrected dispersion function for right versin of dp.
+%5/18/15 - Corrected dispersion function for right version of dp.
+%5/26/15 - Added energy per nucelon to beam data display.
+%        - Made resolution number on dispersion plot less wrong. (I hope.)
+
+%   To Do:
+%       Throw a more obvious error when requesting data that hasn't been generated to
+%       dynac.short by a failed run.  Warn when plots are from previous
+%       run.
 
 if (nargin>=4)
     epfilename=[varargin{3} filesep 'emit.plot'];
@@ -953,11 +960,19 @@ function write_cosy_distribution(gcbo, eventdata, x, xp, y, yp, phase, energy, f
         out.emitynorm=C{5};
         out.emitynon=C{8};
         
+        %Get data from main DynacGUI window
+        figtag = 'DynacGUI';
+        guifig = findobj(allchild(0),'flat','Tag',figtag);
+        guihand=guidata(guifig);
+        
+        eperu=str2double(out.energyrp)/guihand.settings.A;
+        
         %Create output string:
         i=1;
         outstring{i}=['Beam Data for Plot: ' title]; i=i+1;
         outstring{i}=' ';i=i+1;
         outstring{i}=['RP Energy: ' out.energyrp ' MeV'];i=i+1;
+        outstring{i}=['       RP Energy / nucleon: ' num2str(eperu) ' MeV/u'];i=i+1;
         outstring{i}=['RP Beta: ' out.betarp];i=i+1;
         outstring{i}=' ';i=i+1;
         outstring{i}=['X-Alpha: ' out.alphax];i=i+1;
@@ -1174,7 +1189,6 @@ function px_fig=px_plot(~,~,x,energy,plottitle,varargin)
         momentumrp=energyrp*(beta*gamma/(gamma-1)); %in MeV/c
         momentum=energy/beta; % This is actually dp = dW / beta
         pwidth=str2double(dw) / beta; %(dw is in keV)
-        pwidthoverp=pwidth/momentumrp;
         dpp=momentum/momentumrp;
             px_fig=figure('Name','Relative Momentum vs. X');
             
@@ -1183,11 +1197,13 @@ function px_fig=px_plot(~,~,x,energy,plottitle,varargin)
                  scatter(x,dpp*100,'r.');
                 %Find fit line
                 fitcoeffs=polyfit(dpp,x,1); %Coeffs in (dp/p)/cm and (dp/p)
-                dispersion=.01*mean(x.*dpp)/mean(dpp.*dpp); 
+                dispersion=0.01*mean(x.*dpp)/mean(dpp.*dpp); 
                         %Dispersion function in meters (m /(dp/p))
+                resolution=abs(dispersion/(2*std(x)*0.01));
+                    %Resolution function for separation of 2 sigma
                 disptext=sprintf(['Dispersion: %s m / (dp/p)\n'...
                     'R (4 RMS): %s '],...
-                    num2str(dispersion),num2str(1/pwidthoverp));
+                    num2str(dispersion),num2str(resolution));
                 lim=axis;
                 
                 %Plot line and caption

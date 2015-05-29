@@ -113,6 +113,7 @@ function varargout = DynacGUI(varargin)
 %            - Made plot type list in Z axis box dynamic depending on Dynac
 %            version
 %            - Added 'DynacGUI' to view files menu.
+%            - Added x, y envelopes to x, y dispersion plots.
 %
 %       Wishlist:
 %         - Ability to run COSY decks
@@ -1696,6 +1697,8 @@ function zplots_button_Callback(~, ~, handles) %#ok<DEFNU>
         set(transaxes,'YTickMode','auto')
         switch graphtype
             case 1 %X/Y Envelope Plot
+                set(xline,'LineStyle','-');
+                set(yline,'LineStyle','-');
                 set(xline,'Visible','on');
                 set(yline,'Visible','on');
                 set(yaxislabel,'String','RMS Width [mm]');
@@ -1726,9 +1729,13 @@ function zplots_button_Callback(~, ~, handles) %#ok<DEFNU>
                 set(espreadline,'Visible','on');
                 set(yaxislabel,'String','Delta E / E [%]');
             case 9 % X Dispersion
+                set(xline,'Visible','on');
+                set(xline,'LineStyle',':');
                 set(xdispline,'Visible','on');
                 set(yaxislabel,'String','x / (dp / p) [m]');
             case 10
+                set(yline,'Visible','on');
+                set(yline,'LineStyle',':');
                 set(ydispline,'Visible','on');
                 set(yaxislabel,'String','y / (dp / p) [m]'); 
             case 99 %None of the above

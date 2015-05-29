@@ -507,11 +507,13 @@ while ~feof(layoutfile)
             if ~isfield(settings,card{1,4}) %Check for missing settings
                 disperror(['Error: Missing tune setting for ' card{1,4}],1);
                 continue
-            end            
+            end
+            rfqdegrees=settings.(card{1,4});
+            rfqphaseoffset=100*rfqdegrees/360; % degrees - > percentage
             fprintf(outfile,'%s\r\n',rfqfilename);
             fprintf(outfile,'%s\r\n',devices{id,1}{1,3});
             fprintf(outfile,'%g %g %g %s\r\n',settings.(card{1,3})-100,...
-                settings.(card{1,3})-100,settings.(card{1,4}),'180');
+                settings.(card{1,3})-100,rfqphaseoffset,'180');
             fprintf(outfile,'%s\r\n','REJECT');
             fprintf(outfile,'0 %g %g %g %g %g\r\n', RFQreject, reject(2),...
                 reject(3), reject(4), reject(5));
