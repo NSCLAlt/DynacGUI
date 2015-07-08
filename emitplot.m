@@ -74,6 +74,7 @@ function varargout=emitplot(freqlist,varargin)
 %5/18/15 - Corrected dispersion function for right version of dp.
 %5/26/15 - Added energy per nucelon to beam data display.
 %        - Made resolution number on dispersion plot less wrong. (I hope.)
+%7/7/15  - Added support for zone plots
 
 %   To Do:
 %       Throw a more obvious error when requesting data that hasn't been generated to
@@ -106,7 +107,7 @@ while ~feof(plotfile)
     end
     graphtype=uint16(str2double(strtrim(linein)));
     switch graphtype
-        case 1; %Emittance Plot
+        case {1}; %Emittance Plot 
             plottitle=strtrim(fgetl(plotfile));
             %read in x x' limits
             linein=fgetl(plotfile);
@@ -379,7 +380,7 @@ while ~feof(plotfile)
                 fclose(plotfile);
                 return 
             end;
-        case 6; %Multi-Charge State Plot
+        case {6,11}; %Multi-Charge State Plot or Zone Plot
             fgetl(plotfile);%Indicates plot type?
             fgetl(plotfile);%Indicates charge state?
             plottitle=strtrim(fgetl(plotfile));
@@ -460,6 +461,9 @@ while ~feof(plotfile)
             %Generate the figure
             fh=figure('Name',plottitle);
             chgvals=unique(xchg);
+            if graphtype==11
+                chgvals=circshift(chgvals,[0,-1]);
+            end
             nstates=length(chgvals);
             colors=colormap(hsv(nstates));
             toolsmenu=uimenu(fh,'Label','DynacGUI Tools');
@@ -498,7 +502,12 @@ while ~feof(plotfile)
             
             %Generate the X X' plot
             xxpplot=subplot(2,2,1);
-                scatter(x,xp,1,xchg,'filled');
+                %scatter(x,xp,1,xchg,'filled');
+                for j=1:nstates
+                    chindex=find(xchg==chgvals(j));
+                    scatter(x(chindex),xp(chindex),1,colors(j,:),'filled');
+                    hold on
+                end
                 axis([xlim xplim]);
                 title('Horizontal Phase Space');
                 xlabel('X (cm)');
@@ -516,8 +525,14 @@ while ~feof(plotfile)
                     yyph(j)=scatter(y(chindex),yp(chindex),1,colors(j,:),'filled');
                     hold on
                 end
+                %Generate the legend
                 if nstates>1
-                    leg=legend(strtrim(cellstr(num2str(chgvals'))'));
+                    legtext=strtrim(cellstr(num2str(chgvals'))');
+                    if graphtype==11 %Zone Plots only
+                        legtext(end)=strcat('>',legtext(end-1));
+                        legtext(1:end-1)=strcat('<',legtext(1:end-1));
+                    end
+                    leg=legend(legtext);
                     s1=get(leg,'Children');
                     s2=[];
                     s2=findobj(s1,{'type','patch','-or','type','line'});
@@ -537,7 +552,12 @@ while ~feof(plotfile)
             %Generate the realspace plot, with profiles
             xyplot=subplot(2,2,3);
                 %plot(x,y,'r.','MarkerSize',3);
-                scatter(x,y,1,xchg,'filled');
+                for j=1:nstates
+                    chindex=find(xchg==chgvals(j));
+                    scatter(x(chindex),y(chindex),1,colors(j,:),'filled');
+                    hold on
+                end
+                %scatter(x,y,1,xchg,'filled');
                 axis([xlim ylim]);
                 title('Real Space');
                 xlabel('X (cm)');
@@ -560,7 +580,12 @@ while ~feof(plotfile)
             %Generate the phase/energy plot
             teplot=subplot(2,2,4);
                 %plot(phase,energy,'r.','MarkerSize',3);
-                scatter(phase,energy,1,pechg,'filled');
+                %scatter(phase,energy,1,pechg,'filled');
+                for j=1:nstates
+                    chindex=find(xchg==chgvals(j));
+                    scatter(phase(chindex),energy(chindex),1,colors(j,:),'filled');
+                    hold on
+                end
                 axis([plim elim]);
                 title('Longitudinal Phase Space');
                 xlabel('Time (ns)');

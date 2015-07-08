@@ -66,8 +66,18 @@ function [settings,freqlist]=gendeck(outputfilename,settings,layoutfilename,devi
 %multi-charge state beam
 %        - Now reading default values for sectors and RFQreject from .ini
 %        file
+%6/3/15  - Added support for SECORD, FIRORD, and SEXTUPO cards.
+%6/8/15  - Added support for FDRIFT, QUADSXT, SOQUAD
+%6/10/15 - Added support for FSOLE
+%6/11/15 - Added suppot for systematic errors in accelerating elements
+%                   (MMODE)
+%7/8/15 - Added support for ZONES
 
-%-----Default Parameters----% (Move to .ini file eventually)
+%To Do
+%       Put some error checking in Zones in case of incorrect numbers of
+%       input parameters.
+
+%-----Default Parameters----% (Only used if not defined in .ini file)
 RFQreject=0.5; %Fractional deviation from average energy to be rejected after RFQ. Note
               %that this is from the average INCLUDING the unaccelerated
               %beam. 
@@ -310,7 +320,7 @@ while ~feof(layoutfile)
             if ~strcmp(cavfield,devices{id,1}{1,2})
                 cavfield=devices{id,1}{1,2};
                 if exist(cavfield,'file')==0 %Throw an error if cavity field not present
-                    disperror(['Warning: Cavity file ' cavfield ' not found.'],errorflag)
+                    disperror(['Warning: Cavity file "' cavfield '" not found.'],errorflag)
                     errorflag=1;
                 end
                 if ~ispc
@@ -340,6 +350,11 @@ while ~feof(layoutfile)
                 settings.(card{1,3})-100,'8','1');
             unitstruct.(card{1,3})='[%]';
             unitstruct.(card{1,4})='[deg]';
+        %case 'CAVSC' %Single symmetric accelerating cavity
+        %    fprintf(outfile,'CAVSC\r\n');
+        %    fprintf(outfile,'0 0 0 %s %s %s 0 0 0 0 %s %s 0 %s %s %s\r\n',...
+        %        sclength,scttf,sctp,scefield,scphase,sctpp,scfreqency,...
+        %        scefieldatten);
         case 'DRIFT' %Drift space
             fprintf(outfile,'%s\r\n','DRIFT');
             fprintf(outfile,'%s\r\n',card{1,2});
@@ -395,6 +410,35 @@ while ~feof(layoutfile)
             fprintf(outfile,'%s %s %s %s\r\n','0','0','0','0');
             freqlist=[freqlist runfreq];
             i=i+1;
+        case 'FDRIFT' %Subdivided Drift
+            fprintf(outfile,'%s\r\n','FDRIFT');
+            fprintf(outfile,'%s %s 1\r\n',card{1,2},card{1,3});
+        case 'FIRORD' %First order calculations for all elements
+            fprintf(outfile,'FIRORD\r\n');
+        case 'FSOLE' %Solenoid with field specified by external file
+            id=find(strcmp(card{1,2},devicetypes));
+            if ~isfield(settings,card{1,3}) %Check for missing settings
+                disperror(['Error: Missing tune setting for ' card{1,3}],1);
+                continue
+            end
+            solfile=devices{id,1}{1,2};
+            if ~ispc
+                    strrep(solfile,'\','/');
+                end
+            if exist(solfile,'file')==0 %Throw a warning if file isn't present
+                disperror(['Warning: Solenoid file "' solfile '" not found.'],errorflag)
+                errorflag=1;
+            end
+            nparts=devices{id,1}{1,3};
+            fprintf(outfile,'FSOLE\r\n');
+            fprintf(outfile,'%s\r\n',solfile);
+            fprintf(outfile,'%g %s\r\n',settings.(card{1,3}),nparts);
+            unitstruct.(card{1,3})='[kG]';
+        case 'MMODE' %Systematic or random errors in cavities
+            id=find(strcmp(card{1,2},devicetypes));
+            fprintf(outfile,'MMODE\r\n');
+            fprintf(outfile,'%s %s %s\r\n',devices{id,1}{1,2},...
+                devices{id,1}{1,3},devices{id,1}{1,4});
         case 'NEWF' %New Frequency in Hz
             fprintf(outfile,'%s\r\n','NEWF');
             fprintf(outfile,'%s\r\n',card{1,2});
@@ -414,6 +458,22 @@ while ~feof(layoutfile)
                 devices{id,1}{1,2}, settings.(card{1,3}),...
                 devices{id,1}{1,3});
             unitstruct.(card{1,3})='[kG]';
+        case 'QUADSXT' %Combined magnetic quadrupole and sextupole
+            id=find(strcmp(card{1,2},devicetypes));
+            if ~isfield(settings,card{1,3}) %Check for missing sextupole setting
+                disperror(['Error: Missing tune setting for ' card{1,3}],1);
+                continue
+            end
+            if ~isfield(settings,card{1,4}) %Check for missing quad setting
+                disperror(['Error: Missing tune setting for ' card{1,4}],1);
+                continue
+            end
+            fprintf(outfile,'%s\r\n','QUADSXT');
+            fprintf(outfile,'1 %g 1 %g %s %s\r\n',...
+                settings.(card{1,3}), settings.(card{1,4}),...
+                devices{id,1}{1,2}, devices{id,1}{1,3});
+            unitstruct.(card{1,3})='[kG]';
+            unitstruct.(card{1,4})='[kG]';
         case 'QUAELEC' %Electrostatic Quad
             id=find(strcmp(card{1,2},devicetypes));
             if ~isfield(settings,card{1,3}) %Check for missing settings
@@ -497,7 +557,7 @@ while ~feof(layoutfile)
                     strrep(rfqfilename,'\','/');
                 end
             if exist(rfqfilename,'file')==0
-                disperror(['Warning: RFQ file ' rfqfilename ' not found.'],errorflag)
+                disperror(['Warning: RFQ file "' rfqfilename '" not found.'],errorflag)
                 errorflag=1;
             end
             if ~isfield(settings,card{1,3}) %Check for missing settings
@@ -570,6 +630,20 @@ while ~feof(layoutfile)
         case 'SCPOS' %Space charge position in cavities
             fprintf(outfile,'%s\r\n','SCPOS');
             fprintf(outfile,'%s\r\n',card{1,2});
+        case 'SECORD' %Second order computations for elemeents that support them
+            fprintf(outfile,'SECORD\r\n');
+        case 'SEXTUPO' %Magnetic Sextupole
+            %Note: if SECORD is not enabled, will act as a drift
+            id=find(strcmp(card{1,2},devicetypes));
+            if ~isfield(settings,card{1,3}) %Check for missing settings
+                disperror(['Error: Missing tune setting for ' card{1,3}],1);
+                continue
+            end
+            fprintf(outfile,'%s\r\n','SEXTUPO');
+            fprintf(outfile,'1 %g %s %s\r\n',...
+                settings.(card{1,3}), devices{id,1}{1,2},...
+                devices{id,1}{1,3});
+            unitstruct.(card{1,3})='[kG]';            
         case 'SLIT' %Horizontal or vertical slit
             if ~isfield(settings,card{1,2}) %Check for missing settings
                 disperror(['Error: Missing tune setting for ' card{1,2}],1);
@@ -599,6 +673,22 @@ while ~feof(layoutfile)
             fprintf(outfile,'%s %s %g\r\n','1',devices{id,1}{1,2},...
                 settings.(card{1,3}));
             unitstruct.(card{1,3})='[kG]';
+        case 'SOQUAD' %Combined magnetic quadrupole and solenoid
+            id=find(strcmp(card{1,2},devicetypes));
+            if ~isfield(settings,card{1,3}) %Check for missing solenoid setting
+                disperror(['Error: Missing tune setting for ' card{1,3}],1);
+                continue
+            end
+            if ~isfield(settings,card{1,4}) %Check for missing quad setting
+                disperror(['Error: Missing tune setting for ' card{1,4}],1);
+                continue
+            end
+            fprintf(outfile,'%s\r\n','SOQUAD');
+            fprintf(outfile,'1 %g 1 %g %s %s\r\n',...
+                settings.(card{1,3}), settings.(card{1,4}),...
+                devices{id,1}{1,2}, devices{id,1}{1,3});
+            unitstruct.(card{1,3})='[kG]';
+            unitstruct.(card{1,4})='[kG]';            
         case 'STEER' %Steerer
             %Note that electrostatic steerers are NOT in the official
             %Dynac release as of 4/16/14.
@@ -628,6 +718,22 @@ while ~feof(layoutfile)
             fprintf(outfile,'%s\r\n','WRBEAM');
             fprintf(outfile,'%s\r\n',card{1,2});
             fprintf(outfile,'%s %s\r\n','1','2');
+        case 'ZONES' %Start tracking RMS zones
+            id=find(strcmp(card{1,2},devicetypes)); %Get zone type
+            nzones=length(devices{id,1})-1; 
+            ztype=devices{id,1}{1,2};
+            fprintf(outfile,'ZONES\r\n');
+            if strcmp(ztype,'-1')
+                fprintf(outfile,'1 0\r\n');
+                fprintf(outfile,'0\r\n');
+            else
+                fprintf(outfile,'%s %g\r\n',ztype,nzones);
+                zonestr='';
+                for k=1:(nzones-1)
+                    zonestr=[zonestr devices{id,1}{1,2+k} ' '];
+                end
+                fprintf(outfile,'%s\r\n',zonestr);                
+            end
         case 'ZROT' %Rotation
             fprintf(outfile,'%s\r\n','ZROT');
             fprintf(outfile,'%s\r\n',card{1,2});

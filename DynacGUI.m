@@ -114,12 +114,22 @@ function varargout = DynacGUI(varargin)
 %            version
 %            - Added 'DynacGUI' to view files menu.
 %            - Added x, y envelopes to x, y dispersion plots.
+%Version 4.2 - Made "Edit Tune" window non resizable.
+%            - Fixed a bug if you run without the Optimization Toolbox
+%            available
+%            - Fixed a bug which arose if no emittance plots were defined
+%            - Added support for zone plots
+%            - Will ignore duplicate plot names rather than crashing
+%            - Forced text editor calls into the background, which was
+%            causing issues.
 %
 %       Wishlist:
 %         - Ability to run COSY decks
 %         - Programmatically deterimine box location lines (DONE)
 %               -Do this for EMITL, not just EMITGR cards
 %         - Make "Edit Tune Settings" box well behaved under resizing.
+%               Cheated for now - made it non resizable.
+%         - Better error handling of duplicate plot names.
 %
 
 % Last Modified by GUIDE v2.5 29-Jul-2014 11:48:56
@@ -155,7 +165,7 @@ function DynacGUI_OpeningFcn(hObject, eventdata, handles, varargin)
 handles.output = hObject;
 
 %VERSION NUMBER
-handles.dgversion='4.1';
+handles.dgversion='4.2';
 
 %Check for open window and refuse to fire again if there is one.
 figtag = 'DynacGUI';
@@ -362,7 +372,7 @@ switch type
     otherwise
         return
 end
-system([handles.texteditor filename]);
+system([handles.texteditor filename ' &']);
 end
 
 function call_dgf(hObject,~)
@@ -708,7 +718,9 @@ set(handles.viewdeck_button,'Enable','on');
 set(handles.sr_menu,'Enable','off');
 set(handles.rundeck_checkbox,'Value',0);
 set(handles.longdist_checkbox,'Value',0.0);
-set(handles.fitmenu,'Enable','on');
+if isfield(handles,'fitmenu') %Only if there IS a fit menu item
+    set(handles.fitmenu,'Enable','on');
+end
 handles.genfilename=outputfilename;
 guidata(hObject, handles);
 end
@@ -783,13 +795,13 @@ fclose(sf);
 handles.settings=settings;
 
 %set display boxes for global variables
-set(handles.a_textbox,'String',settings.A);
-set(handles.q_textbox,'String',settings.Q);
-set(handles.energy_textbox,'String',settings.Energy);
+set(handles.a_textbox,'String',num2str(settings.A));
+set(handles.q_textbox,'String',num2str(settings.Q));
+set(handles.energy_textbox,'String',num2str(settings.Energy));
 if isfield(settings,'Deltae')
-    set(handles.deltae_textbox,'String',settings.Deltae);
+    set(handles.deltae_textbox,'String',num2str(settings.Deltae));
 end
-set(handles.npart_textbox,'String',settings.Npart);
+set(handles.npart_textbox,'String',num2str(settings.Npart));
 
 guidata(hObject, handles)
 end
@@ -961,7 +973,8 @@ scrsz = get(0,'ScreenSize');
 %Setup box with scrollable list
 %Generate actual figure, sized relative to screen size.
 settingsfigure=figure('Name','Settings Dialog','NumberTitle','Off',...
-    'Position',[.1*scrsz(3) .02*scrsz(4) scrsz(3)/2 scrsz(4)*.9]);
+    'Position',[.1*scrsz(3) .02*scrsz(4) scrsz(3)/2 scrsz(4)*.9],...
+    'Resize','off');
 %Generate the backgound panel with the title of the tune.
 panel1 = uipanel('Parent',settingsfigure,'Title',...
     get(handles.settingsfile_inputbox,'String'),...
@@ -2140,9 +2153,9 @@ function [plotlist,plotloc,shortnames,plotzpos]=scanemitplot(freqlist,handles)
 
     plotlist=[];
     plotloc=[];
+    plotzpos={};
     shortnames=[]; %List of short names for emittance plots
     if isempty(freqlist)
-        plotzpos=[];
     else
         try
            plotfile=fopen('emit.plot');
@@ -2158,9 +2171,10 @@ function [plotlist,plotloc,shortnames,plotzpos]=scanemitplot(freqlist,handles)
             if (line==-1) %If it's a -1, quit
                 break;
             end
-            if (regexp(line,'^\s{11}\d')==1) %If it is a lone digit in place eleven
-                plottype=line(12); %Set the plot type to the value
-                if plottype=='6' %Multi charge state plot (Always an emittance plot)
+            if regexp(line,'^\s{10,11}\d{1,2}')==1 
+                %If column eleven or twelve is one or two digits
+                plottype=str2num(line(11:12)); %Set the plot type to the value
+                if plottype==6 %Multi charge state plot (Always an emittance plot)
                     temp=ftell(plotfile)-14;
                     dummy=fgetl(plotfile);
                     dummy=fgetl(plotfile);
@@ -2173,6 +2187,16 @@ function [plotlist,plotloc,shortnames,plotzpos]=scanemitplot(freqlist,handles)
                     plotname=[' Emittance Plot: ' strtrim(plotname)...
                         ' - ' num2str(freqlist(i)*10^-6) 'MHz'];
                     i=i+1;
+                elseif plottype==11 %Zone Plot
+                    temp=ftell(plotfile)-14;
+                    dummy=fgetl(plotfile);
+                    dummy=fgetl(plotfile);
+                    plotname=fgetl(plotfile);
+                    plotloc=[plotloc temp]; %Add plot location to the list
+                    sname=plotname;
+                    plotname=[' Zone Plot: ' strtrim(plotname)...
+                        ' - ' num2str(freqlist(i)*10^-6) 'MHz'];
+                    i=i+1;
                 else %Not multi charge state plot
                     temp=ftell(plotfile)-14;
                     plotname=fgetl(plotfile);
@@ -2180,7 +2204,7 @@ function [plotlist,plotloc,shortnames,plotzpos]=scanemitplot(freqlist,handles)
                         continue
                     end
                     plotloc=[plotloc temp]; %Add the plot location to the list                
-                    if (plottype=='1') %If this is an emittance plot, edit the name
+                    if (plottype==1) %If this is an emittance plot, edit the name
                         sname=plotname;
                         plotname=[' Emittance Plot: ' strtrim(plotname)...
                             ' - ' num2str(freqlist(i)*10^-6) 'MHz'];
@@ -2245,10 +2269,13 @@ function [plotlist,plotloc,shortnames,plotzpos]=scanemitplot(freqlist,handles)
         %If current line matches a stored short name...
         if ~isempty(find(strcmp(shortnames,strtrim(line)), 1))
             %add the position to the appropriate index in plotzpos
-            plotzpos{find(strcmp(shortnames,strtrim(line)))}=zpos;
+            plotzpos{find(strcmp(shortnames,strtrim(line)),1)}=zpos;
         end
         line=fgetl(dsfile);
     end
+    
+    fclose(dsfile);
+    
     ud=get(handles.generatedgraphs_listbox,'UserData');
     ud.plotlist=plotlist;
     ud.plotloc=plotloc;
@@ -2257,7 +2284,7 @@ function [plotlist,plotloc,shortnames,plotzpos]=scanemitplot(freqlist,handles)
     ud.devarray=devarray;
     set(handles.generatedgraphs_listbox,'UserData',ud);
     guidata(gcbf,handles);
-    fclose(dsfile);
+    
 end
 
 
