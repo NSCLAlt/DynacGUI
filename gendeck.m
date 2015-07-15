@@ -72,6 +72,9 @@ function [settings,freqlist]=gendeck(outputfilename,settings,layoutfilename,devi
 %6/11/15 - Added suppot for systematic errors in accelerating elements
 %                   (MMODE)
 %7/8/15 - Added support for ZONES
+%7/15/15 - Added some desperately need error checking.  Now fails
+%           gracefully if you have a device in your layout
+%           thats not in your devices file.
 
 %To Do
 %       Put some error checking in Zones in case of incorrect numbers of
@@ -280,6 +283,7 @@ while ~feof(layoutfile)
     card=regexp(line,'\t','split');
     switch card{1,1}
         case 'BMAGNET' %Bending Magnet
+            if ~checkdevice(card{1,2},devicetypes); continue; end;
             id=find(strcmp(card{1,2},devicetypes));
             if (length(card)>=3) && isfield(settings,card{1,3}) && ~isempty(settings.(card{1,3}))
                 %If thre is a third parameter
@@ -299,6 +303,7 @@ while ~feof(layoutfile)
             fprintf(outfile,'%s %s %s %s %s\r\n',devices{id,1}{1,7},...
                 devices{id,1}{1,8},'.45','2.8',devices{id,1}{1,9});          
         case 'BUNCHER' %Buncher
+            if ~checkdevice(card{1,2},devicetypes); continue; end;
             id=find(strcmp(card{1,2},devicetypes));
             if ~isfield(settings,card{1,4}) %Check for missing settings
                 disperror(['Error: Missing tune setting for ' card{1,4}],1);
@@ -314,6 +319,7 @@ while ~feof(layoutfile)
             unitstruct.(card{1,4})='[MV]';
             unitstruct.(card{1,5})='[deg]';
         case 'CAVNUM' %Accelerating Cavity
+            if ~checkdevice(card{1,2},devicetypes); continue; end;
             id=find(strcmp(card{1,2},devicetypes));
             %Checks to see if this is a new cavity field type. If it is,
             %issue a FIELD command with the filename.
@@ -359,6 +365,7 @@ while ~feof(layoutfile)
             fprintf(outfile,'%s\r\n','DRIFT');
             fprintf(outfile,'%s\r\n',card{1,2});
         case 'EDFLEC' %Electrostatic Deflector
+            if ~checkdevice(card{1,2},devicetypes); continue; end;
             id=find(strcmp(card{1,2},devicetypes));
             fprintf(outfile,'%s\r\n','EDFLEC');
             fprintf(outfile,'%s\r\n',num2str(esectors));
@@ -386,6 +393,7 @@ while ~feof(layoutfile)
             fprintf(outfile,'EMITL\r\n');
             fprintf(outfile,'%s\r\n',card{1,2});
         case 'EMITGR' %Emittance Plot
+            if ~checkdevice(card{1,2},devicetypes); continue; end;
             id=find(strcmp(card{1,2},devicetypes));
             xlim=devices{id,1}{1,3};
             xplim=devices{id,1}{1,4};
@@ -401,6 +409,7 @@ while ~feof(layoutfile)
             fprintf(outfile,'EMITL\r\n'); %Add a parameter dump to dynac.short
             fprintf(outfile,'%s\r\n',card{1,3});
         case 'ENVEL' %Envelope Plot
+            if ~checkdevice(card{1,2},devicetypes); continue; end;
             id=find(strcmp(card{1,2},devicetypes));
             fprintf(outfile,'%s\r\n','ENVEL');
             fprintf(outfile,'%s\r\n',card{1,3});
@@ -416,6 +425,7 @@ while ~feof(layoutfile)
         case 'FIRORD' %First order calculations for all elements
             fprintf(outfile,'FIRORD\r\n');
         case 'FSOLE' %Solenoid with field specified by external file
+            if ~checkdevice(card{1,2},devicetypes); continue; end;
             id=find(strcmp(card{1,2},devicetypes));
             if ~isfield(settings,card{1,3}) %Check for missing settings
                 disperror(['Error: Missing tune setting for ' card{1,3}],1);
@@ -435,6 +445,7 @@ while ~feof(layoutfile)
             fprintf(outfile,'%g %s\r\n',settings.(card{1,3}),nparts);
             unitstruct.(card{1,3})='[kG]';
         case 'MMODE' %Systematic or random errors in cavities
+            if ~checkdevice(card{1,2},devicetypes); continue; end;
             id=find(strcmp(card{1,2},devicetypes));
             fprintf(outfile,'MMODE\r\n');
             fprintf(outfile,'%s %s %s\r\n',devices{id,1}{1,2},...
@@ -448,6 +459,7 @@ while ~feof(layoutfile)
             fprintf(outfile,'%s %s %s %s\r\n',card{1,2},card{1,3},...
                 card{1,4},card{1,5});
         case 'QUADRUPO' %Magnetic Quadrupole
+            if ~checkdevice(card{1,2},devicetypes); continue; end;
             id=find(strcmp(card{1,2},devicetypes));
             if ~isfield(settings,card{1,3}) %Check for missing settings
                 disperror(['Error: Missing tune setting for ' card{1,3}],1);
@@ -459,6 +471,7 @@ while ~feof(layoutfile)
                 devices{id,1}{1,3});
             unitstruct.(card{1,3})='[kG]';
         case 'QUADSXT' %Combined magnetic quadrupole and sextupole
+            if ~checkdevice(card{1,2},devicetypes); continue; end;
             id=find(strcmp(card{1,2},devicetypes));
             if ~isfield(settings,card{1,3}) %Check for missing sextupole setting
                 disperror(['Error: Missing tune setting for ' card{1,3}],1);
@@ -475,6 +488,7 @@ while ~feof(layoutfile)
             unitstruct.(card{1,3})='[kG]';
             unitstruct.(card{1,4})='[kG]';
         case 'QUAELEC' %Electrostatic Quad
+            if ~checkdevice(card{1,2},devicetypes); continue; end;
             id=find(strcmp(card{1,2},devicetypes));
             if ~isfield(settings,card{1,3}) %Check for missing settings
                 disperror(['Error: Missing tune setting for ' card{1,3}],1);
@@ -486,6 +500,7 @@ while ~feof(layoutfile)
                 devices{id,1}{1,3});
             unitstruct.(card{1,3})='[kV]';
         case 'REJECT' %Reject Card (used for apertures, slits, etc.)
+            if ~checkdevice(card{1,2},devicetypes); continue; end;
             id=find(strcmp(card{1,2},devicetypes));
             fprintf(outfile,'%s\r\n','REJECT');
             fprintf(outfile,'1 %s %s %s %s %s\r\n',devices{id,1}{1,2},...
@@ -502,6 +517,7 @@ while ~feof(layoutfile)
         case 'RFKICK'
             %Note that rf kickers are NOT in the official
             %Dynac release as of 4/20/14.
+            if ~checkdevice(card{1,2},devicetypes); continue; end;
             id=find(strcmp(card{1,2},devicetypes));
             steertype=devices{id,1}{1,2};
             if ~isfield(settings,card{1,4}) %Check for missing settings
@@ -523,6 +539,7 @@ while ~feof(layoutfile)
             unitstruct.(card{1,4})='[kV]';
             unitstruct.(card{1,5})='[deg]';
         case 'RFQPTQ' %RFQ
+            if ~checkdevice(card{1,2},devicetypes); continue; end;
             id=find(strcmp(card{1,2},devicetypes));
             %This branch is for the first part of the t>RFQ period routine
             %It terminates the deck immediately before the RFQ.
@@ -586,6 +603,7 @@ while ~feof(layoutfile)
             unitstruct.(card{1,3})='[%]';
             unitstruct.(card{1,4})='[deg]';
         case 'SCDYNAC' %Space Charge
+            if ~checkdevice(card{1,2},devicetypes); continue; end;
             id=find(strcmp(card{1,2},devicetypes));
             sctype=devices{id,1}{1,2};
             if ~isfield(settings,card{1,3}) %Check for missing settings
@@ -634,6 +652,7 @@ while ~feof(layoutfile)
             fprintf(outfile,'SECORD\r\n');
         case 'SEXTUPO' %Magnetic Sextupole
             %Note: if SECORD is not enabled, will act as a drift
+            if ~checkdevice(card{1,2},devicetypes); continue; end;
             id=find(strcmp(card{1,2},devicetypes));
             if ~isfield(settings,card{1,3}) %Check for missing settings
                 disperror(['Error: Missing tune setting for ' card{1,3}],1);
@@ -664,6 +683,7 @@ while ~feof(layoutfile)
             unitstruct.(card{1,2})='[cm]';
             unitstruct.(card{1,3})='[cm]';
         case 'SOLENO' %Solenoid
+            if ~checkdevice(card{1,2},devicetypes); continue; end;
             id=find(strcmp(card{1,2},devicetypes));
             if ~isfield(settings,card{1,3}) %Check for missing settings
                 disperror(['Error: Missing tune setting for ' card{1,3}],1);
@@ -674,6 +694,7 @@ while ~feof(layoutfile)
                 settings.(card{1,3}));
             unitstruct.(card{1,3})='[kG]';
         case 'SOQUAD' %Combined magnetic quadrupole and solenoid
+            if ~checkdevice(card{1,2},devicetypes); continue; end;
             id=find(strcmp(card{1,2},devicetypes));
             if ~isfield(settings,card{1,3}) %Check for missing solenoid setting
                 disperror(['Error: Missing tune setting for ' card{1,3}],1);
@@ -719,6 +740,7 @@ while ~feof(layoutfile)
             fprintf(outfile,'%s\r\n',card{1,2});
             fprintf(outfile,'%s %s\r\n','1','2');
         case 'ZONES' %Start tracking RMS zones
+            if ~checkdevice(card{1,2},devicetypes); continue; end;
             id=find(strcmp(card{1,2},devicetypes)); %Get zone type
             nzones=length(devices{id,1})-1; 
             ztype=devices{id,1}{1,2};
@@ -778,3 +800,11 @@ else
     out=4;
 end
 
+function cd=checkdevice(deviceid,devicelist)
+%checks a device list for the presence of the given device.  Throws an
+%error if not found and sets cd = 0
+
+cd=any(ismember(devicelist,deviceid));
+if ~cd
+    disperror(['Error: Device ' deviceid ' not found in devices file.'],1);
+end
