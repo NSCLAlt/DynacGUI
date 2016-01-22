@@ -697,14 +697,14 @@ fitmode=get(get(handles.fit_buttongroup,'SelectedObject'),'String');
 if strcmp(fitmode,'Minimize')
     %x, fval, exitflag
     [result,fval,~,output]=fmincon(@(x)dynfunc(x,selectedpar,fitdeckname),...
-        fitstarts,[],[],[],[],fitlower,fitupper,[],options)
+        fitstarts,[],[],[],[],fitlower,fitupper,[],options);
 elseif strcmp(fitmode,'Maximize')
     [result,fval,~,output]=fmincon(@(x)(-dynfunc(x,selectedpar,fitdeckname)),...
-        fitstarts,[],[],[],[],fitlower,fitupper,[],options)
+        fitstarts,[],[],[],[],fitlower,fitupper,[],options);
 elseif strcmp(fitmode,'Fit to Value:')
     fitvalue=str2num(get(handles.fitvalue_editbox,'String'));
     [result,fval,~,output]=fmincon(@(x)abs(fitvalue-dynfunc(x,selectedpar,fitdeckname)),...
-        fitstarts,[],[],[],[],fitlower,fitupper,[],options)
+        fitstarts,[],[],[],[],fitlower,fitupper,[],options);
 else
     disperror('Error: Undefined fit mode');
     return;

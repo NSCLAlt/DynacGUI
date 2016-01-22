@@ -123,7 +123,7 @@ newline=fgetl(csfile);
 i=1;
 while ~feof(csfile)
     newline=fgetl(csfile);
-    if regexp(newline,'^--') || regexp(newline,'^#') || regexp(newline,'^;')
+    if regexp(newline,'^(--|#|;)')
         continue;
     else
         csdata{i,1}=regexp(newline,'\s+','split'); 
@@ -135,6 +135,9 @@ fclose(csfile);
 %Convert CS data to a structure - csstruct
 fnames=cellfun(@(v) v(1),csdata(:,1));
 fieldvalues=cellfun(@(v) v(setcol),csdata(:,1));
+fnames=strrep(fnames,'.',''); %Strip periods from channel names.
+fnames=strrep(fnames,':',''); %Strip colons from channel names.
+fnames=strrep(fnames,'-',''); %Strip hyphens from channel names.
 csstruct=cell2struct(fieldvalues,fnames,1);
 csstruct=structfun(@(x) str2double(x),csstruct,'UniformOutput',0);
 

@@ -17,7 +17,8 @@ function varargout = DynacGUI(varargin)
 %  State University (c) Copyright 2015.
 %  
 %   Contact Information:
-%    Facility for Rare Isotope Beam
+%    Daniel Alt (alt@nscl.msu.edu)
+%    Facility for Rare Isotope Beams
 %    Michigan State University
 %    East Lansing, MI 48824-1321
 %    http://frib.msu.edu
@@ -122,6 +123,33 @@ function varargout = DynacGUI(varargin)
 %            - Will ignore duplicate plot names rather than crashing
 %            - Forced text editor calls into the background, which was
 %            causing issues.
+%Version 4.3 - Changed profile plot axis label to "half width".
+%            - Made some tweaks to the envelope plots - added RMS line.
+%            - Modified rescale utility to allow for scaling of partial
+%            lines
+%            - Rescale Tune button now refreshes settings window if open.
+%            - Refuse to open a second settings window if one is already
+%            open - 8/10/15
+%            - Refresh the "tune settings" window if a new tune file is
+%            loaded. - 8/10/15
+%            - Quadrupole markers on z plots now offset depending on sign -
+%            10/21/15
+%            - Added .dst file viewer - 10/26/15 (in progress)
+%            - Added DynacVersion variable to .ini file, replaced Edflec
+%            check with generalized version check. 11/3/15
+%            - Modified *.dst viewer to use RP enegy as reference if it is
+%            included in the .dst file. 11/3/15
+%            - "Statistics too low" message now displays in red, and
+%            changes plot list to red to warn that plots are outdated.
+%            11/13/15
+%            - Modified *.dst viewer to also display relative energy in MeV
+%            - Added basic overplotting functionality, needs tweaking
+%            (11/16/16)
+%            - Overplotting now allows axis unit changes for both plots.
+%            - Cleaned up axis rescaling in pe plots in *.dst viewer
+%            (11/25/15)
+%            - Added "Settings" window to allow changing integration steps
+%            without restarting. (12/23/15)
 %
 %       Wishlist:
 %         - Ability to run COSY decks
@@ -130,6 +158,13 @@ function varargout = DynacGUI(varargin)
 %         - Make "Edit Tune Settings" box well behaved under resizing.
 %               Cheated for now - made it non resizable.
 %         - Better error handling of duplicate plot names.
+%         - Display arbitrary .dst file - In progress
+%              - Implement sub menus.
+%              - Overlay still needs text and histograms to work in all
+%              axis configurations.
+%              - Move this out of main function
+%              - Multi charge state files
+%         - Dialogue box to adjust .ini settings from within program
 %
 
 % Last Modified by GUIDE v2.5 29-Jul-2014 11:48:56
@@ -165,7 +200,7 @@ function DynacGUI_OpeningFcn(hObject, eventdata, handles, varargin)
 handles.output = hObject;
 
 %VERSION NUMBER
-handles.dgversion='4.2';
+handles.dgversion='4.3';
 
 %Check for open window and refuse to fire again if there is one.
 figtag = 'DynacGUI';
@@ -179,7 +214,13 @@ guihandle=findobj('Tag','figure1');
 set(guihandle,'Tag','DynacGUI');
 
 %Default Settings - will be overriden if .INI file is present
+defaultversion=14; %Default Dynac version
 handles.executable='dynacv6_0';
+handles.dynac_version=defaultversion; 
+handles.inivals.Esectors='10';
+handles.inivals.Bsectors='10';
+handles.inivals.Csectors='8';
+handles.inivals.RFQreject='0.5';
 
 %Open INI file and read initialization parameters:
 inifile=fopen('DynacGUI.ini');
@@ -207,10 +248,17 @@ if inifile>=1
     tmp=cellfun(@(v) v(1),iniarray(:,1));
     tmp2=cellfun(@(v) v(2),iniarray(:,1));
     handles.inivals=cell2struct(tmp2,tmp,1);
-    set(handles.dynac_output_textbox,'String',inivars);
     fclose(inifile);
     
     %Deal with the values present in the .ini file
+    if isfield(handles.inivals,'DynacVersion')
+        handles.dynac_version=str2num(handles.inivals.DynacVersion);
+    else
+        inivars=[{'No Dynac version specified in DynacGUI.ini!'}...
+            {['Assuming version ' num2str(defaultversion)]}...
+            {' '} inivars];
+        handles.inivals.DynacVersion=num2str(defaultversion);
+    end
     if isfield(handles.inivals,'Tune')
         set(handles.settingsfile_inputbox,'String',handles.inivals.Tune);    
         outputfile=regexprep(handles.inivals.Tune,'\.[^.]+$','.in');
@@ -226,6 +274,10 @@ if inifile>=1
     if isfield(handles.inivals,'Executable')
         handles.executable=handles.inivals.Executable;
         if isfield(handles.inivals,'Executable2') %If there is a second executable...
+            %check for a version specifier, set a value if missing
+            if ~isfield(handles.inivals,'DynacVersion2')
+                handles.inivals.DynacVersion2=defaultversion;
+            end
             %setup executable choice
             exmenu=uimenu(hObject,'Label','Executable');
             handles.inivals.exm1=uimenu(exmenu,'Label',...
@@ -235,6 +287,9 @@ if inifile>=1
                 handles.inivals.Executable2,'Callback',...
                 {@change_executable,2});
             if isfield(handles.inivals,'Executable3') %If there is ALSO a third
+                if ~isfield(handles.inivals,'DynacVersion3')
+                    handles.inivals.DynacVersion3=defaultversion;
+                end
                 handles.inivals.exm3=uimenu(exmenu,'Label',...
                     handles.inivals.Executable3,'callback',...
                     {@change_executable,3});
@@ -255,12 +310,15 @@ if inifile>=1
         set(handles.machinetune_button,'Visible','off');
     end
     if isfield(handles.inivals,'Edflec')
-        if ~strcmp(handles.inivals.Edflec,'3') && ~strcmp(handles.inivals.Edflec,'4');
-            disp('Error: Invald Edflec Value - setting to 4');
-            handles.inivals.Edflec=4;
-        end
+        inivars=[{'Edflec parameter in DynacGUI.ini is no longer used.'}...
+            {'DynacVersion will be used to set E Deflector type'}...
+            {' '} inivars];
     end
+    %Display .ini values
+    set(handles.dynac_output_textbox,'String',inivars);
 end
+
+
 
 guidata(hObject,handles);
 
@@ -314,6 +372,9 @@ if exist('loadcs.m','file');
     uimenu(toolsmenu,'Label','Load CS Tune',...
         'Callback',{'loadcs'});
 end
+%Add Settings Dialog
+uimenu(toolsmenu,'Label','Settings','Callback',@change_dynacgui_settings,...
+    'separator','on');
 %If no tools are present, hide tools menu
 if isempty(get(toolsmenu,'Children'))
     set(toolsmenu,'Visible','off');
@@ -350,15 +411,18 @@ uimenu(handles.filesmenu,'Label','Current Devices File','Callback',...
 uimenu(handles.filesmenu,'Label','Current Tune File','Callback',...
     {@viewcurrent,'tune'});
 uimenu(handles.filesmenu,'Label','Current Output Deck','Callback',...
-    {@viewcurrent,'deck'},'Separator','on');
+    {@viewcurrent,'deck'});
 uimenu(handles.filesmenu,'Label','DynacGUI.ini','Callback',...
     ['system(''' handles.texteditor 'DynacGUI.ini &'');'],...
     'Separator','on');
+uimenu(handles.filesmenu,'Label','Plot .dst file...','Callback',...
+    {@plotdst},'Separator','on');
 
 guidata(hObject,handles);
 end
 
 function viewcurrent(hObject,~,type)
+%Call text viewer for specified file
 handles=guidata(hObject);
 switch type
     case 'layout'    
@@ -376,6 +440,7 @@ system([handles.texteditor filename ' &']);
 end
 
 function call_dgf(hObject,~)
+%Call DynacGUI fitting window
 handles=guidata(hObject);
 filename=get(handles.outputdeck_inputbox,'String');
 DynacGUIFit(filename);
@@ -449,62 +514,83 @@ function scaled_tune(hObject,~)
     escale=1;
     bscale=1;
     cavscale=1;
+    swheight=400;
     scalewin=figure('Name','Generate Scaled Tune','Color',[0.941 0.941 0.941],...
-        'Position',[50 500 560 150]);
+        'Position',[50 500 560 swheight],'NumberTitle','Off');
     handles=guidata(hObject);
     uicontrol('Style','Text','String','Current Settings:',...
-        'Position',[10 130 100 20],'FontSize',10);
+        'Position',[10 swheight-20 100 20],'FontSize',10);
     uicontrol('Style','Text',...
         'String','Q:','HorizontalAlignment','Right',...
-        'Position',[10 100 70 20]);
-    input_initialq=uicontrol('Style','text','Position',[90 100 60 20],...
+        'Position',[10 swheight-50 70 20]);
+    input_initialq=uicontrol('Style','text','Position',[90 swheight-50 60 20],...
         'String',num2str(handles.settings.Q),'HorizontalAlignment','Left');
     uicontrol('Style','Text',...
         'String','A:','HorizontalAlignment','Right',...
-        'Position',[10 80 70 20]);
-    input_initiala=uicontrol('Style','text','Position',[90 80 60 20],...
+        'Position',[10 swheight-70 70 20]);
+    input_initiala=uicontrol('Style','text','Position',[90 swheight-70 60 20],...
         'String',num2str(handles.settings.A),'HorizontalAlignment','Left');
     uicontrol('Style','text','String','Energy (MeV): ',...
-        'Position',[10 60 70 20]);
-    input_initiale=uicontrol('Style','edit','Position',[90 60 60 20],...
+        'Position',[10 swheight-90 70 20]);
+    input_initiale=uicontrol('Style','edit','Position',[90 swheight-90 60 20],...
         'BackgroundColor','white','String',num2str(handles.settings.Energy),...
         'Callback',@enter_scale,'HorizontalAlignment','Left');
     uicontrol('Style','Text','String','Scale To:',...
-        'Position',[200 130 100 20],'FontSize',10,...
+        'Position',[200 swheight-20 100 20],'FontSize',10,...
         'HorizontalAlignment','Center');
     uicontrol('Style','Text','HorizontalAlignment','Right',...
-        'String','Q:','Position',[200,100,70,20]);
+        'String','Q:','Position',[200,swheight-50,70,20]);
     uicontrol('Style','Text','HorizontalAlignment','Right',...
-        'String','A:','Position',[200,80,70,20]);
+        'String','A:','Position',[200,swheight-70,70,20]);
     uicontrol('Style','Text','HorizontalAlignment','Right',...
-        'String','Energy (MeV):','Position',[200,60,70,20]);
-    input_finalq=uicontrol('Style','edit','Position',[280,100,70,20],...
+        'String','Energy (MeV):','Position',[200,swheight-90,70,20]);
+    input_finalq=uicontrol('Style','edit','Position',[280,swheight-50,70,20],...
         'HorizontalAlignment','Left','String',num2str(handles.settings.Q),...
         'BackgroundColor','White','Callback',@enter_scale);
-    input_finala=uicontrol('Style','edit','Position',[280,80,70,20],...
+    input_finala=uicontrol('Style','edit','Position',[280,swheight-70,70,20],...
         'HorizontalAlignment','Left','String',num2str(handles.settings.A),...
         'BackgroundColor','White','Callback',@enter_scale);
-    input_finale=uicontrol('Style','edit','Position',[280,60,70,20],...
+    input_finale=uicontrol('Style','edit','Position',[280,swheight-90,70,20],...
         'HorizontalAlignment','Left','String',num2str(handles.settings.Energy),...
         'BackgroundColor','White','Callback',@enter_scale);
     uicontrol('Style','Text','HorizontalAlignment','Center',...
         'FontSize',10,'String','Scaling Factors',...
-        'Position',[400 130 100 20]);
+        'Position',[400 swheight-20 100 20]);
     uicontrol('Style','Text','HorizontalAlignment','Right',...
-        'String','E:','Position',[400 100 50 20]);
+        'String','E:','Position',[400 swheight-50 50 20]);
     uicontrol('Style','Text','HorizontalAlignment','Right',...
-        'String','B:','Position',[400 80 50 20]);
+        'String','B:','Position',[400 swheight-70 50 20]);
     uicontrol('Style','Text','HorizontalAlignment','Right',...
-        'String','Cav:','Position',[400 60 50 20]);
+        'String','Cav:','Position',[400 swheight-90 50 20]);
     escalebox=uicontrol('Style','Text','HorizontalAlignment','Left',...
-        'String',num2str(escale,3),'Position',[460 100 50 20]);
+        'String',num2str(escale,3),'Position',[460 swheight-50 50 20]);
     bscalebox=uicontrol('Style','Text','HorizontalAlignment','Left',...
-        'String',num2str(bscale,3),'Position',[460 80 50 20]);
+        'String',num2str(bscale,3),'Position',[460 swheight-70 50 20]);
     cavscalebox=uicontrol('Style','Text','HorizontalAlignment','Left',...
-        'String',num2str(cavscale,3),'Position',[460 60 50 20]);
+        'String',num2str(cavscale,3),'Position',[460 swheight-90 50 20]);
     uicontrol('style','pushbutton','FontSize',10,...
-        'String','Rescale Tune','Position',[20 20 100 20],...
+        'String','Rescale Tune','Position',[440 swheight-130 100 20],...
         'Callback',{@rescale_button_callback,hobj});
+    startpointbox=uicontrol('Style','listbox','Position',[20 20 180 swheight-160],...
+        'BackgroundColor','white');
+    endpointbox=uicontrol('Style','listbox','Position',[240 20 180 swheight-160],...
+        'BackgroundColor','white');
+    uicontrol('style','text','String','Start Point:',...
+        'Position',[20 swheight-140 180 20],'HorizontalAlignment','Left');
+    uicontrol('style','text','String','End Point:',...
+        'Position',[240 swheight-140 180 20],'HorizontalAlignment','Left');
+    
+    %Populate start and end point boxes
+    layoutfilename=get(handles.layoutfile_inputbox,'String');
+    rsdevlist={};
+    layoutfile=fopen(layoutfilename);
+        while ~feof(layoutfile)
+            linein=regexprep(fgetl(layoutfile),'\t',' ');
+            rsdevlist=[rsdevlist linein];
+        end
+    fclose(layoutfile);
+    set(startpointbox,'String',rsdevlist);
+    set(endpointbox,'String',rsdevlist,'Value',length(rsdevlist));
     
     function rescale_button_callback(~, ~, hObject)
         %Callback for "Rescale Tune" button.
@@ -513,8 +599,10 @@ function scaled_tune(hObject,~)
         layoutfilename=get(handles.layoutfile_inputbox,'String');
         devicefilename=get(handles.devicefile_inputbox,'String');
         outputfilename=get(handles.outputdeck_inputbox,'String');
+        
         [handles.settings]=rescaletune(handles.settings,layoutfilename,...
-            devicefilename,escale,bscale,cavscale);
+            devicefilename,escale,bscale,cavscale,get(startpointbox,'Value'),...
+            get(endpointbox,'Value'));
         
         %Set "Run" box to off.
         set(handles.gendeck_checkbox,'Value',0);
@@ -536,6 +624,12 @@ function scaled_tune(hObject,~)
         set(input_initiala,'String',get(input_finala,'String')); 
         set(input_initiale,'String',get(input_finale,'String'));
         guidata(hObject,handles);
+        
+        setwin=findobj(allchild(0),'Tag','DGSettings');
+        if ishandle(setwin)
+            close(setwin);
+            showsettings_button_Callback(hObject,[],handles);
+        end            
     end
     
     function enter_scale(~, ~)
@@ -562,6 +656,7 @@ function change_executable(hObject, ~, exnumber)
     handles=guidata(hObject);
     if exnumber==1
         handles.executable=handles.inivals.Executable;
+        handles.dynac_version=str2num(handles.inivals.DynacVersion);
         set(handles.inivals.exm1,'Checked','On');
         set(handles.inivals.exm2,'Checked','Off');
         if isfield(handles.inivals,'exm3');
@@ -569,6 +664,7 @@ function change_executable(hObject, ~, exnumber)
         end
     elseif exnumber==2
         handles.executable=handles.inivals.Executable2;
+        handles.dynac_version=str2num(handles.inivals.DynacVersion2);
         set(handles.inivals.exm1,'Checked','Off');
         set(handles.inivals.exm2,'Checked','On');
         if isfield(handles.inivals,'exm3')
@@ -576,6 +672,7 @@ function change_executable(hObject, ~, exnumber)
         end
     elseif exnumber==3
         handles.executable=handles.inivals.Executable3;
+        handles.dynac_version=handles.inivals.DynacVersion3;
         set(handles.inivals.exm1,'Checked','Off');
         set(handles.inivals.exm2,'Checked','Off');
         set(handles.inivals.exm3,'Checked','On');
@@ -753,6 +850,13 @@ else
     set(handles.longdist_checkbox,'Value',0.0);
 end
 guidata(hObject, handles)
+
+    %If the "edit tune settings" window is open, regenerate it.
+        setwin=findobj(allchild(0),'Tag','DGSettings');
+        if ishandle(setwin)
+            close(setwin);
+            showsettings_button_Callback(hObject,[],handles);
+        end 
 end
 
 function populate_data(hObject,~,handles)
@@ -898,7 +1002,7 @@ if isfield(handles,'genfilename') %If the specified deck really exists
     
     %Execute Dynac
     [~,dynacoutput]=system(command); 
-    set(handles.dynac_output_textbox,'String',dynacoutput);
+    set(handles.dynac_output_textbox,'String',dynacoutput,'ForegroundColor','k');
     guidata(hObject,handles);
     
     %Set checkboxes
@@ -907,9 +1011,11 @@ if isfield(handles,'genfilename') %If the specified deck really exists
     set(handles.longdist_checkbox,'Value',0.0);
     if regexp(dynacoutput,'statistics too low')
         dynacoutput={'Execution Failed, less than ten particles remaining.',...
-            'Check dynac.long for more information.'};
-        set(handles.dynac_output_textbox,'String',dynacoutput);
+            'Check dynac.long for more information.',...
+            'Note: any plots displayed at left are from last successful run.'};
+        set(handles.dynac_output_textbox,'String',dynacoutput,'ForegroundColor','r');
         set(handles.zplots_button,'Enable','off');
+        set(handles.generatedgraphs_listbox,'ForegroundColor','r');
         return
     end
     set(handles.sr_menu,'Enable','on');
@@ -921,7 +1027,8 @@ if isfield(handles,'genfilename') %If the specified deck really exists
     %Retrieve updated plot list
     ud=get(handles.generatedgraphs_listbox,'UserData');
     if isfield(ud,'plotlist')
-        set(handles.generatedgraphs_listbox,'String',ud.plotlist);
+        set(handles.generatedgraphs_listbox,'String',ud.plotlist,...
+            'ForegroundColor','k');
     end
     set(handles.generatedgraphs_listbox,'Value',1);
     %Store ud, now containing plot locations as well as frequencies
@@ -959,6 +1066,13 @@ end
 % --- Executes on button press in showsettings_button.
 function showsettings_button_Callback(hObject, ~, handles) %#ok<DEFNU>
 
+%Check to see if the window is already open, and if it is, refuse to open
+%another one
+setwin=findobj(allchild(0),'Tag','DGSettings');
+        if ishandle(setwin)
+            return
+        end 
+
 %Retrieve list of units
 if ~isempty(get(hObject,'UserData'))
     unitstruct=get(hObject,'UserData');
@@ -972,9 +1086,9 @@ scrsz = get(0,'ScreenSize');
 
 %Setup box with scrollable list
 %Generate actual figure, sized relative to screen size.
-settingsfigure=figure('Name','Settings Dialog','NumberTitle','Off',...
+settingsfigure=figure('Name','Tune Settings','NumberTitle','Off',...
     'Position',[.1*scrsz(3) .02*scrsz(4) scrsz(3)/2 scrsz(4)*.9],...
-    'Resize','off');
+    'Resize','off','Tag','DGSettings');
 %Generate the backgound panel with the title of the tune.
 panel1 = uipanel('Parent',settingsfigure,'Title',...
     get(handles.settingsfile_inputbox,'String'),...
@@ -1387,7 +1501,7 @@ function zplots_button_Callback(~, ~, handles) %#ok<DEFNU>
     backgroundcolor=get(plot_window,'color');
     set(transaxes,'Position',[.05 .2 .9 .75]);
     xline=plot(transaxes,zdata.data(:,1),zdata.data(:,2),'Color','r');
-    ylabel(transaxes,'1 RMS Full Width (mm)');
+    ylabel(transaxes,'1 RMS Half Width (mm)');
     set(transaxes,'color','none');
     box(transaxes,'off');
     
@@ -1437,8 +1551,8 @@ function zplots_button_Callback(~, ~, handles) %#ok<DEFNU>
     
     %Plot Y Envelope
     hold on;
-    yenvelopeline1=plot(transaxes,zdata.data(:,1),zdata.data(:,13),'Color','r');
-    yenvelopeline2=plot(transaxes,zdata.data(:,1),zdata.data(:,14),'Color','r');
+    yenvelopeline1=plot(transaxes,zdata.data(:,1),zdata.data(:,13),'Color','g');
+    yenvelopeline2=plot(transaxes,zdata.data(:,1),zdata.data(:,14),'Color','g');
     set(yenvelopeline1,'Visible','off');
     set(yenvelopeline2,'Visible','off');
     
@@ -1591,9 +1705,11 @@ function zplots_button_Callback(~, ~, handles) %#ok<DEFNU>
     end
 
     %Plot element type graphics along axis
-    for j=1:length(ud.devarray.end);        
+    for j=1:length(ud.devarray.end);
+        devlinewidth=5;
         line([ud.devarray.end(j)-ud.devarray.length(j) ud.devarray.end(j)],...
-            [0,0],'Color',ud.devarray.color(j),'LineWidth',5,'Parent',transaxes);
+            [ud.devarray.offset(j)/devlinewidth,ud.devarray.offset(j)/devlinewidth],...
+            'Color',ud.devarray.color(j),'LineWidth',devlinewidth,'Parent',transaxes);
     end
     
     %setup axes for particle number counts
@@ -1714,7 +1830,7 @@ function zplots_button_Callback(~, ~, handles) %#ok<DEFNU>
                 set(yline,'LineStyle','-');
                 set(xline,'Visible','on');
                 set(yline,'Visible','on');
-                set(yaxislabel,'String','RMS Width [mm]');
+                set(yaxislabel,'String','1 RMS Half Width [mm]');
             case 2 %X/Y Emittance Plot
                 set(xemitline,'Visible','on');
                 set(yemitline,'Visible','on');
@@ -1730,10 +1846,14 @@ function zplots_button_Callback(~, ~, handles) %#ok<DEFNU>
             case 5 % X Envelope Plot
                 set(xenvelopeline1,'Visible','on');
                 set(xenvelopeline2,'Visible','on');
+                set(xline,'Visible','on');
+                set(xline,'LineStyle',':');
                 set(yaxislabel,'String','X Envelope [mm]');
             case 6 % Y Envelope Plot
                 set(yenvelopeline1,'Visible','on');
                 set(yenvelopeline2,'Visible','on');
+                set(yline,'Visible','on');
+                set(yline,'LineStyle',':');
                 set(yaxislabel,'String','Y Envelope [mm]');                
             case 7 % Time Spread
                 set(tspreadline,'Visible','on');
@@ -2230,20 +2350,27 @@ function [plotlist,plotloc,shortnames,plotzpos]=scanemitplot(freqlist,handles)
     %Scan through 'dynac.short' to find plot z-positions
     dsfile=fopen('dynac.short');
     zpos=0;
-    line=fgetl(dsfile);
+    nextline=fgetl(dsfile);
     
     devarray=[]; %Structure array containing positions and types of devices
     i=1;
     while ~feof(dsfile)
         %Store running z position in zpos for lines starting with position
-        runpos=regexp(line,'^\s*(?<zpos>\d*\.*\d*) mm\s*(?<type>\w*).*(?:length|trajectory):?\s*=*\s*(?<length>\d*\.*\d*E?[+-]?\d*)','names'); 
+        runpos=regexp(nextline,'^\s*(?<zpos>\d*\.*\d*) mm\s*(?<type>\w*).*(?:length|trajectory):?\s*=*\s*(?<length>\d*\.*\d*E?[+-]?\d*)','names'); 
         if ~isempty(runpos)
             zpos=str2double(runpos.zpos)*.001; %convert to m
+            devarray.offset(i)=0;
             %Store start, length, type, and color code for each device listed
             switch runpos.type 
                 case 'Quadrupole'
                     devarray.type(i)='Q';                  
                     devarray.color(i)='g';
+                    devarray.offset(i)=1;
+                    valueline=fgetl(dsfile);
+                    sign=regexp(valueline,'^\s*(voltage|field)\s=\s*(?<sign>-)','once');
+                    if ~isempty(sign);
+                        devarray.offset(i)=-1;
+                    end
                 case 'bending'
                     devarray.type(i)='B';
                     devarray.color(i)='b';
@@ -2267,11 +2394,11 @@ function [plotlist,plotloc,shortnames,plotzpos]=scanemitplot(freqlist,handles)
             end
         end
         %If current line matches a stored short name...
-        if ~isempty(find(strcmp(shortnames,strtrim(line)), 1))
+        if ~isempty(find(strcmp(shortnames,strtrim(nextline)), 1))
             %add the position to the appropriate index in plotzpos
-            plotzpos{find(strcmp(shortnames,strtrim(line)),1)}=zpos;
+            plotzpos{find(strcmp(shortnames,strtrim(nextline)),1)}=zpos;
         end
-        line=fgetl(dsfile);
+        nextline=fgetl(dsfile);
     end
     
     fclose(dsfile);
@@ -2350,7 +2477,7 @@ function viewdeck_button_Callback(~, ~, handles) %#ok<DEFNU>
 %http://www.mathworks.com/matlabcentral/answers/19553-display-window-for-text-file
 deckfile=get(handles.outputdeck_inputbox,'String');
 
-f = figure('menu','none','toolbar','none','Name',deckfile);
+f = figure('menu','none','toolbar','none','Name',deckfile,'NumberTitle','Off');
 fid = fopen(deckfile);
 %ph = uipanel(f,'Units','normalized','position',[0.4 0.3 0.5 0.5],'title',...
 %    deckfile);
@@ -2381,3 +2508,489 @@ guifig = findobj(allchild(0), 'flat','Tag', figtag);
 guihand = guidata(guifig);
 set(guihand.dynac_output_textbox,'String',errortext);
 end
+
+function plotdst(~,~,~)
+%Plot an arbitrary distribution file
+
+%[dstfile,dstfpath,~]=uigetfile(['Particle Distributions' filesep '*.dst']);
+dst=getdst;
+
+    if isequal(dst.file,0)
+    %selection cancelled
+        return
+    end
+
+
+eaxtype='pct'; 
+paxtype='ns'; 
+dst2={};
+
+%Generate the figure
+plots.fh=figure('Renderer','Painter','Name',dst.file);
+            
+    %Generate the X X' plot
+    plots.xx=subplot(2,2,1);
+        plot(dst.x,dst.xp,'r.','MarkerSize',3);
+        title('Horizontal Phase Space');
+        xlabel('X (cm)');
+        ylabel('Px (mrad)');
+        grid on;
+        dstxlim=xlim;
+        dstxplim=ylim;
+    %Generate the Y Y' plot
+    plots.yy=subplot(2,2,2);
+        plot(dst.y,dst.yp,'r.','MarkerSize',3);
+        title('Vertical Phase Space');
+        xlabel('Y (cm)');
+        ylabel('Py (mrad)');
+        grid on;
+    %Generate the realspace plot, with profiles
+    plots.xy=subplot(2,2,3);
+        plot(dst.x,dst.y,'r.','MarkerSize',3);
+        title('Real Space');
+        xlabel('X (cm)');
+        ylabel('Y (cm)');
+        grid on;
+        hold on;
+        dstxlim=xlim;
+        dstylim=ylim;
+        %Add histograms and widths
+        [xelements,xcenters]=hist(dst.x,30);
+        [yelements,ycenters]=hist(dst.y,30);
+        xyxhist=plot(xcenters,(xelements/max(xelements))*0.25*(dstylim(2)-dstylim(1))+dstylim(1));
+        xyyhist=plot((yelements/max(yelements))*0.25*(dstxlim(2)-dstxlim(1))+dstxlim(1),ycenters);
+        profiletext=sprintf('X \\sigma = %g\nY \\sigma = %g',std(dst.x),std(dst.y));
+        dstxlim=xlim;
+        dstylim=ylim;
+        xyt=text(dstxlim(2),dstylim(2),profiletext,'HorizontalAlignment','right',...
+            'VerticalAlignment','top','FontSize',8);
+        hold off;
+    %Generate the phase/energy plot
+    plots.te=subplot(2,2,4);
+        tep=plot(dst.phase,dst.pctenergy,'r.','MarkerSize',3);
+        teaxes=gca;
+        title('Longitudinal Phase Space');
+        paxislabel=xlabel('Time (ns)');
+        set (paxislabel,'ButtonDownFcn',{@changepaxis});
+        eaxislabel=ylabel('Rel. Energy dE/E %');
+        set (eaxislabel,'ButtonDownFcn',{@changeeaxis});
+        grid on;
+        hold on;
+        dstplim=xlim;
+        dstelim=ylim;
+        
+        %Add histograms and widths
+        [dst.pelements,dst.pcenters]=hist(dst.phase,50);
+        [dst.eelements,dst.ecenters]=hist(dst.pctenergy,50);
+        pephist=plot(dst.pcenters,(dst.pelements/max(dst.pelements))*.25*(dstelim(2)-dstelim(1))+dstelim(1));
+        peehist=plot((dst.eelements/max(dst.eelements))*.25*(dstplim(2)-dstplim(1))+dstplim(1),dst.ecenters);
+        
+        dstplim=xlim;
+        dstelim=ylim;
+        dst.ewidthpct=6*std(dst.pctenergy);
+        dst.ewidthmev=dst.ewidthpct*dst.eavg;
+        dst.pwidthns=6*std(dst.phase);
+        dst.pwidthdeg=dst.pwidthns*360*dst.freq*10^-9;
+        dst.pwidthtext=[num2str(dst.pwidthns) ' ns'];
+        dst.ewidthtext=[num2str(dst.ewidthpct) ' (%)'];
+        profiletext=sprintf('Phase 3\\sigma FW: %s\nEnergy 3\\sigma FW: %s\n',...
+            dst.pwidthtext,dst.ewidthtext);
+        tet=text(dstplim(2),dstelim(2),profiletext,'HorizontalAlignment','right',...
+            'VerticalAlignment','top','FontSize',8);
+        hold off;
+        set(tet,'Position',[dstplim(2) dstelim(2)])    
+
+    sfilename=strrep(dst.file,'_','\_');       
+    stitle=suptitle(sfilename);
+
+    %Add Menu Options
+    toolsmenu=uimenu(plots.fh,'Label','DynacGUI Tools');
+    uimenu(toolsmenu,'Label','Show Distribution Properties','Callback',...
+        {@showdstdata,dst.file,dst});
+    uimenu(toolsmenu,'Label','Overplot Additional .dst file','Callback',...
+        {@overplotdst,plots});
+%wm1=uimenu(toolsmenu,'Label','Auxiliary Plots','separator','on');
+%wm3=uimenu(toolsmenu,'Label','Export COSY Distribution File','Callback',...
+%         {@write_cosy_distribution,x,xp,y,yp,phase,energy,freqlist(plotnumber)});
+%            wm4=uimenu(toolsmenu,'Label',...
+%           'Export TRACK Distribution File','Callback',...
+%           {@write_track_distribution,x,xp,y,yp,phase,energy,freqlist(plotnumber)});
+            
+
+%     %Auxiliary Plots Menu
+%     pm0=uimenu(wm1,'Label','X vs. Time','Callback',...
+%         {@xt_plot,x,phase});
+%     pm1=uimenu(wm1,'Label','Y vs. Time','Callback',...
+%         {@yt_plot,y,phase});
+%     pm2=uimenu(wm1,'Label','X vs. Energy','Callback',...
+%         {@xe_plot,x,energy});
+%     pm3=uimenu(wm1,'Label','Y vs. Energy','Callback',...
+%         {@ye_plot,y,energy});
+%     pm4=uimenu(wm1,'Label','P vs. x','Callback',...
+%         {@px_plot,x,energy,plottitle});
+%     pm5=uimenu(wm1,'Label','Phase / Energy Histogram','Callback',...
+%         {@p_hist,phase,plottitle});
+    
+    function changeeaxis(~,~)
+        %Change energy axis scale
+        if strcmp(eaxtype,'pct')
+            %Set energy axis to absolute energy in MeV
+            set(peehist,'Ydata',dst.eavg*(1+0.01*dst.ecenters));
+            set(pephist,'Ydata',dst.eavg*(1+0.01*get(pephist,'Ydata')));
+            set(tep,'Ydata',dst.absenergy);
+            dst.ewidthtext=[num2str(dst.ewidthmev) ' MeV'];
+            if isfield(dst2,'absenergy'); set(dst2.tep,'Ydata',dst2.absenergy); end;
+            set(eaxislabel,'String','Energy (MeV)');
+            eaxtype='abs';
+        elseif strcmp(eaxtype,'abs')
+            %Set energy axis to relative energy in MeV
+            set(peehist,'Ydata',(dst.eavg*(1+0.01*dst.ecenters)-dst.eavg));
+            set(pephist,'Ydata',get(pephist,'Ydata')-dst.eavg);
+            set(tep,'Ydata',dst.relenergy);
+            if isfield(dst2,'relenergy'); set(dst2.tep,'Ydata',dst2.relenergy); end;
+            set(eaxislabel,'String','Rel. Energy (MeV)');
+            eaxtype='rel';
+        elseif strcmp(eaxtype,'rel')
+            %Set energy axis to percent energy deviation
+            set(peehist,'Ydata',dst.ecenters);
+            set(pephist,'Ydata',100*get(pephist,'Ydata')/dst.eavg)
+            set(tep,'Ydata',dst.pctenergy);
+            dst.ewidthtext=[num2str(dst.ewidthpct) ' (%)'];
+            if isfield(dst2,'pctenergy'); set(dst2.tep,'Ydata',dst2.pctenergy); end;
+            set(eaxislabel,'String','Rel. Energy dE/E (%)');
+            eaxtype='pct';            
+        end
+        profiletext=sprintf('Phase 3\\sigma FW: %s\nEnergy 3\\sigma FW: %s\n',...
+            dst.pwidthtext,dst.ewidthtext);
+        set(tet,'String',profiletext);
+        dstplim=xlim;
+        dstelim=ylim;
+        set(tet,'Position',[dstplim(2) dstelim(2)])        
+    end
+   
+    function changepaxis(~,~)
+        if strcmp(paxtype,'ns')
+            %Set Phase Axis to Degrees
+            set(peehist,'Xdata',get(peehist,'Xdata')*360*dst.freq*10^(-9));
+            set(pephist,'Xdata',dst.pcenters*360*dst.freq*10^(-9));
+            set(tep,'Xdata',dst.deg);
+            if isfield(dst2,'deg'); set(dst2.tep,'Xdata',dst2.deg); end;
+            set(paxislabel,'String','Phase (deg)');
+            dst.pwidthtext=[num2str(dst.pwidthdeg) ' deg'];
+            paxtype='deg';
+        else
+            %Set Phase Axis to nanoseconds
+            set(tep,'Xdata',dst.phase);
+            if isfield(dst2,'phase'); set(dst2.tep,'Xdata',dst2.phase); end;
+            set(peehist,'Xdata',get(peehist,'Xdata')/360/dst.freq*10^9);
+            set(pephist,'Xdata',dst.pcenters);
+            set(paxislabel,'String','Time (ns)');
+            dst.pwidthtext=[num2str(dst.pwidthns) ' ns'];
+            paxtype='ns';
+        end
+        profiletext=sprintf('Phase 3\\sigma FW: %s\nEnergy 3\\sigma FW: %s\n',...
+            dst.pwidthtext,dst.ewidthtext);
+        set(tet,'String',profiletext);
+        dstplim=xlim;
+        dstelim=ylim;
+        set(tet,'Position',[dstplim(2) dstelim(2)])  
+    end
+
+    function overplotdst(~,~,plots)
+    %given a list of plot handles, load in another .dst file and overplot the
+    %data.
+
+        dst2=getdst;
+        if isequal(dst2.file,0)
+            %selection cancelled
+            return
+        end
+        
+        stitletext=['\color{red}' dst.file '\color{black} / '...
+            '\color{blue}' dst2.file];
+        stitletext=strrep(stitletext,'_','\_');       
+        set(stitle,'String',stitletext);
+        
+        hold(plots.xx,'on');
+        plot(plots.xx,dst2.x,dst2.xp,'b.','MarkerSize',3);
+        hold(plots.yy,'on');
+        plot(plots.yy,dst2.y,dst2.yp,'b.','MarkerSize',3);
+        hold(plots.xy,'on');
+        plot(plots.xy,dst2.x,dst2.y,'b.','MarkerSize',3);
+        hold(plots.te,'on');
+        if strcmp(paxtype,'ns')
+            switch eaxtype
+                case 'rel'
+                    dst2.tep=plot(plots.te,dst2.phase,dst2.relenergy,'b.','MarkerSize',3);
+                case 'pct'
+                    dst2.tep=plot(plots.te,dst2.phase,dst2.pctenergy,'b.','MarkerSize',3);
+                    dstplim=xlim(plots.te);
+                    dstelim=ylim(plots.te);
+                    set(tet,'Position',[dstplim(2) dstelim(2)])
+                case 'abs'
+                    dst2.tep=plot(plots.te,dst2.phase,dst2.absenergy,'b.','MarkerSize',3);
+            end
+        else %phase in degrees
+            switch eaxtype
+                case 'rel'
+                    dst2.tep=plot(plots.te,dst2.deg,dst2.relenergy,'b.','MarkerSize',3);
+                case 'pct'
+                    dst2.tep=plot(plots.te,dst2.deg,dst2.pctenergy,'b.','MarkerSize',3);
+                case 'abs'
+                    dst2.tep=plot(plots.te,dst2.deg,dst2.absenergy,'b.','MarkerSize',3);
+            end
+        end
+
+    end
+
+end
+
+
+
+function dst=getdst
+    %Returns a structure, dst, which contains the data from a .dst file.
+    [dst.file,dst.path,~]=uigetfile(['Particle Distributions' filesep '*.dst']);
+    
+    if isequal(dst.file,0)
+    %selection cancelled
+        return
+    end
+
+    dstfullpath=[dst.path dst.file];
+    %For now, assume .dst files are in MHz and radians.  Allow this to be
+    %configured at some point.
+
+    %Read in the header information
+    dstfid=fopen(dstfullpath);
+        dstheader=fgetl(dstfid);
+        dsthead=strsplit(dstheader);
+    fclose(dstfid);
+
+    dst.freq=str2double(dsthead(4))*10^6; %Freq in Hz
+
+    % Read the particle data
+    dstdata=dlmread(dstfullpath,'',1,0);    
+
+    dst.x  = dstdata(:,1)*10; % cm -> mm
+    dst.xp = dstdata(:,2)*1000; % rad -> mrad
+
+    dst.y =  dstdata(:,3)*10; % cm -> mm
+    dst.yp = dstdata(:,4)*1000; % rad - > mrad
+
+    dst.phase =  dstdata(:,5)*1/(2*pi)*(1/dst.freq)*10^9; %rad -> ns
+    dst.deg = dstdata(:,5)*(180/pi); %rad -> deg
+    dst.absenergy = dstdata(:,6);
+    if length(dsthead)>=5 %If the header contains the RP energy, use that
+        dst.eavg = str2double(dsthead(5)); %RP energy in MEV (not an average)
+    else %If the RP energy is not present, use the c.o.g. energy
+        dst.eavg = mean(dstdata(:,6));
+    end
+    dst.relenergy = (dst.absenergy-dst.eavg);
+    dst.pctenergy = (dst.absenergy/dst.eavg-1)*100;  % E_total -> percentage
+end
+
+function showdstdata(~,~,dstfile,dst)
+%Calculate and display beam properties for a .dst file
+
+%Calculate TWISS parameters 
+sigmax = cov(dst.x,dst.xp);
+sigmay = cov(dst.y,dst.yp);
+sigmaz = cov(dst.phase,dst.mev*1000); %Energy in keV
+
+emitx = sqrt(det(sigmax));
+emity = sqrt(det(sigmay));
+emitz = sqrt(det(sigmaz));
+
+betax = sigmax(1,1)/emitx;
+betay = sigmay(1,1)/emity;
+betaz = sigmaz(1,1)/emitz;
+
+alphax = -sigmax(1,2)/emitx;
+alphay = -sigmay(1,2)/emity;
+alphaz = -sigmaz(1,2)/emitz;
+gammaz = (1+alphaz^2)/betaz;
+
+dx = 2*sqrt(emitx*betax);
+dy = 2*sqrt(emity*betay);
+dtime = 2*sqrt(emitz*betaz);
+denergy = 2*sqrt(emitz*gammaz); 
+
+        %Create output string:
+        i=1;
+        outstring{i}=['Beam Data for File: ' dstfile]; i=i+1;
+        outstring{i}=' ';i=i+1;
+        outstring{i}=['Mean Energy: ' num2str(dst.eavg) ' MeV'];i=i+1;
+        outstring{i}=' ';i=i+1;
+        outstring{i}=['X-Alpha: ' num2str(alphax)];i=i+1;
+        outstring{i}=['X-Beta: ' num2str(betax) ' mm/mrad'];i=i+1;
+        outstring{i}=['X Emittance (4 RMS): ',num2str(emitx*4),' mm.mrad'];i=i+1;
+        outstring{i}=['X 1/2 Width (4 RMS): ' num2str(dx) ' mm'];i=i+1;
+        outstring{i}=' ';i=i+1;
+        outstring{i}=['Y-Alpha: ' num2str(alphay)];i=i+1;
+        outstring{i}=['Y-Beta: ' num2str(betay) ' mm/mrad'];i=i+1;
+        outstring{i}=['Y Emittance (4 RMS): ',num2str(emity*4),' mm.mrad'];i=i+1;
+        outstring{i}=['Y 1/2 Width (4 RMS): ' num2str(dy) ' mm'];i=i+1;
+        outstring{i}=' ';i=i+1;
+        outstring{i}=['Z Emittance (4 RMS, non-normalized): ',num2str(emitz*4),...
+            ' keV.ns'];i=i+1;
+        outstring{i}=['Phase 1/2 Width (4 RMS): ',num2str(dtime), ' ns'];i=i+1;
+        outstring{i}=['Energy 1/2 Width (4 RMS): ',num2str(denergy), ' keV'];i=i+1;
+        outstring{i}=' ';i=i+1;
+        outstring{i}=['Number of Particles: ',num2str(length(dst.x))];i=i+1;
+        
+        %Display output string.
+        %Original code stolen from:
+        %http://www.mathworks.com/matlabcentral/answers/19553-display-window-for-text-file
+
+        f = figure('menu','none','toolbar','none','Name',[dstfile ' data'],...
+            'NumberTitle','Off');
+        ph = uipanel(f,'Units','normalized','position',[0.05 0.05 0.9 0.9],...
+            'BorderType','none');
+        lbh = uicontrol(ph,'style','listbox','Units','normalized','position',...
+            [0 0 1 1],'FontSize',9);
+
+        set(lbh,'string',outstring);
+        set(lbh,'Value',1);
+        set(lbh,'Selected','on');
+
+end
+
+
+function hout=suptitle(str, fs)
+%SUPTITLE Puts a title above all subplots.
+%	SUPTITLE('text') adds text to the top of the figure
+%	above all subplots (a "super title"). Use this function
+%	after all subplot commands.
+
+% This file is from pmtk3.googlecode.com
+
+
+%PMTKauthor Drea Thomas  
+%PMTKdate June 15, 1995
+%PMTKemail drea@mathworks.com
+
+% Warning: If the figure or axis units are non-default, this
+% will break.
+
+% Parameters used to position the supertitle.
+
+% Amount of the figure window devoted to subplots
+plotregion = .92;
+
+% Y position of title in normalized coordinates
+titleypos  = .95;
+
+% Fontsize for supertitle
+if nargin < 2
+  fs = get(gcf,'defaultaxesfontsize')+4;
+end
+
+% Fudge factor to adjust y spacing between subplots
+fudge=1;
+
+haold = gca;
+figunits = get(gcf,'units');
+
+% Get the (approximate) difference between full height (plot + title
+% + xlabel) and bounding rectangle.
+
+	if (~strcmp(figunits,'pixels')),
+		setings(gcf,'units','pixels');
+		pos = get(gcf,'position');
+		setings(gcf,'units',figunits);
+    else
+		pos = get(gcf,'position');
+	end
+	ff = (fs-4)*1.27*5/pos(4)*fudge;
+
+        % The 5 here reflects about 3 characters of height below
+        % an axis and 2 above. 1.27 is pixels per point.
+
+% Determine the bounding rectange for all the plots
+
+h = findobj(gcf,'Type','axes');  
+
+max_y=0;
+min_y=1;
+
+oldtitle =0;
+for i=1:length(h),
+	if (~strcmp(get(h(i),'Tag'),'suptitle')),
+		pos=get(h(i),'pos');
+		if (pos(2) < min_y), min_y=pos(2)-ff/5*3;end;
+		if (pos(4)+pos(2) > max_y), max_y=pos(4)+pos(2)+ff/5*2;end;
+    else
+		oldtitle = h(i);
+	end
+end
+
+if max_y > plotregion,
+	scale = (plotregion-min_y)/(max_y-min_y);
+	for i=1:length(h),
+		pos = get(h(i),'position');
+		pos(2) = (pos(2)-min_y)*scale+min_y;
+		pos(4) = pos(4)*scale-(1-scale)*ff/5*3;
+		set(h(i),'position',pos);
+	end
+end
+
+np = get(gcf,'nextplot');
+set(gcf,'nextplot','add');
+if (oldtitle),
+	delete(oldtitle);
+end
+ha=axes('pos',[0 1 1 1],'visible','off','Tag','suptitle');
+ht=text(.5,titleypos-1,str);set(ht,'horizontalalignment','center','fontsize',fs);
+set(gcf,'nextplot',np);
+axes(haold);
+if nargout,
+	hout=ht;
+end
+end
+
+function change_dynacgui_settings(hObject,~)
+%Change some of the values defined in DynacGUI.ini from within the program
+handles=guidata(hObject);
+parent=hObject;
+swheight=200;
+settingswin=figure('Name','Change DynacGUI Settings','Color',[0.941 0.941 0.941],...
+    'Position',[50 500 300 swheight],'NumberTitle','Off','menubar','none');
+uicontrol('Style','Text','String','Setting',...
+    'Position',[10 swheight-30 100 20]);
+uicontrol('Style','Text','String','Value',...
+    'Position',[90 swheight-30 70 20],'HorizontalAlignment','Center');
+uicontrol('Style','Text','String','Esectors',...
+    'HorizontalAlignment','Right',...
+    'Position',[10 swheight-60 70 20]);
+uicontrol('Style','edit','Position',[90 swheight-60 60 20],...
+    'String',handles.inivals.Esectors,'HorizontalAlignment','Center',...
+    'BackgroundColor','white','Callback',{@dg_setting_callback,'Esectors'});
+uicontrol('Style','Text','String','Bsectors',...
+    'HorizontalAlignment','Right',...
+    'Position',[10 swheight-80 70 20]);
+uicontrol('Style','edit','Position',[90 swheight-80 60 20],...
+    'String',handles.inivals.Bsectors,'HorizontalAlignment','Center',...
+    'BackgroundColor','white','Callback',{@dg_setting_callback,'Bsectors'});
+uicontrol('Style','Text','String','Csectors',...
+    'HorizontalAlignment','Right',...
+    'Position',[10 swheight-100 70 20]);
+uicontrol('Style','edit','Position',[90 swheight-100 60 20],...
+    'String',handles.inivals.Csectors,'HorizontalAlignment','Center',...
+    'BackgroundColor','white','Callback',{@dg_setting_callback,'Csectors'});
+uicontrol('Style','Text','String','RFQreject',...
+    'HorizontalAlignment','Right','Position',[10 swheight-120 70 20]);
+uicontrol('Style','edit','Position',[90 swheight-120 60 20],...
+    'String',handles.inivals.RFQreject,'HorizontalAlignment','Center',...
+    'BackgroundColor','white','Callback',{@dg_setting_callback,'RFQreject'});
+
+function dg_setting_callback(hObject,~,settingname)
+    val=get(hObject,'String');
+    disp(settingname);
+    disp(['Oldvalue: ' handles.inivals.(settingname)]);
+    handles.inivals.(settingname)=val;
+    disp(['Newvalue: ' handles.inivals.(settingname)]);
+    guidata(parent,handles);
+end
+
+end
+

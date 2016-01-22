@@ -4,7 +4,7 @@ function varargout=emitplot(freqlist,varargin)
 %
 %Plots the entire contents of a DYNAC "emit.plot" file if there are no
 %input arguments.  If there are two input arguments, plots ONE graph starting
-%at the offset given by the third input.
+%at the offset given by the second input.
 %Input arguments - freqeuncy list, file position at start, selection number
 %of desired graph, emit.plot directory.
 %
@@ -75,12 +75,20 @@ function varargout=emitplot(freqlist,varargin)
 %5/26/15 - Added energy per nucelon to beam data display.
 %        - Made resolution number on dispersion plot less wrong. (I hope.)
 %7/7/15  - Added support for zone plots
+%11/5/15 - Clicking "Phase" label now toggles between degrees and
+%nanoseconds.  Still needs some tweaking.
+%11/13/15 - Clicking "Energy" label toggles between absolute energy in MeV,
+%and relative energy in % and MeV.
+%12/16/15 - Clicking labels now maintains FW text in the correct position
+%and units.
 
 %   To Do:
 %       Throw a more obvious error when requesting data that hasn't been generated to
-%       dynac.short by a failed run.  Warn when plots are from previous
-%       run.
+%       dynac.short by a failed run.  
+%       Rescale peoval rather than hiding it.
+%       Fix histograms under rescaling.
 
+%If emit.plot directory is not specified, use default
 if (nargin>=4)
     epfilename=[varargin{3} filesep 'emit.plot'];
 else
@@ -93,6 +101,7 @@ end
 
 plotfile=fopen(epfilename);
 
+%If a single plot is specified, advance to that one, otherwise start from 1
 if (nargin>=2)
     fseek(plotfile,varargin{1},'bof');
     plotnumber=varargin{2};
@@ -109,16 +118,17 @@ while ~feof(plotfile)
     switch graphtype
         case {1}; %Emittance Plot 
             plottitle=strtrim(fgetl(plotfile));
+            plotrpenergy=getplotenergy(plottitle);
             %read in x x' limits
             linein=fgetl(plotfile);
             limits=strsplit(strtrim(linein));
             xlim=[str2num(limits{1}) str2num(limits{2})];
             xplim=[str2num(limits{3}) str2num(limits{4})];
             %Read in x x' fitted oval
-            xxpoval=[];
+            xxpoval=zeros(201,2);
             for i=1:201
                 linein=fgetl(plotfile);
-                xxpoval=[xxpoval;str2double(strsplit(strtrim(linein)))];
+                xxpoval(i,:)=str2double(strsplit(strtrim(linein)));
             end
             %Read in actual x x' data
             linein=fgetl(plotfile);
@@ -137,10 +147,10 @@ while ~feof(plotfile)
             ylim=[str2num(limits{1}) str2num(limits{2})];
             yplim=[str2num(limits{3}) str2num(limits{4})];
             %Read in y y' fitted oval
-            yypoval=[];
+            yypoval=zeros(201,2);
             for i=1:201
                 linein=fgetl(plotfile);
-                yypoval=[yypoval;str2double(strsplit(strtrim(linein)))];
+                yypoval(i,:)=str2double(strsplit(strtrim(linein)));
             end
             %Read in y y' actual data
             linein=fgetl(plotfile);
@@ -160,20 +170,20 @@ while ~feof(plotfile)
             plim=[str2num(limits{1}) str2num(limits{2})];
             elim=[str2num(limits{3}) str2num(limits{4})];
             %Read in phase and energy fitted oval
-            peoval=[];
+            peoval=zeros(201,2);
             for i=1:201
                 linein=fgetl(plotfile);
-                peoval=[peoval;str2double(strsplit(strtrim(linein)))];
+                peoval(i,:)=str2double(strsplit(strtrim(linein)));
             end
             %Read in phase and energy data
             linein=fgetl(plotfile);
             npart=uint32(str2double(strtrim(linein)));
-            phase=zeros(1,npart);
+            deg=zeros(1,npart);
             energy=zeros(1,npart);
             for i=1:npart;
                 linein=fgetl(plotfile);
                 pe=strsplit(strtrim(linein));
-                phase(i)=str2double(pe{1}); %[degrees]
+                deg(i)=str2double(pe{1}); %[degrees]
                 energy(i)=str2double(pe{2});
             end
             
@@ -185,16 +195,16 @@ while ~feof(plotfile)
             wm1=uimenu(toolsmenu,'Label','Auxiliary Plots');
             wm2=uimenu(toolsmenu,'Label',...
                 'Write Particle Distribution to File','Callback',...
-                {@write_distribution,x,xp,y,yp,phase,energy,freqlist(plotnumber)},...
+                {@write_distribution,x,xp,y,yp,deg,energy,freqlist(plotnumber)},...
                 'Accelerator','D','Separator','on');
             wm3=uimenu(toolsmenu,'Label',...
                 'Export COSY Distribution File','Callback',...
-                {@write_cosy_distribution,x,xp,y,yp,phase,energy,freqlist(plotnumber)});
+                {@write_cosy_distribution,x,xp,y,yp,deg,energy,freqlist(plotnumber)});
             wm4=uimenu(toolsmenu,'Label',...
                 'Export TRACK Distribution File','Callback',...
-                {@write_track_distribution,x,xp,y,yp,phase,energy,freqlist(plotnumber)});
+                {@write_track_distribution,x,xp,y,yp,deg,energy,freqlist(plotnumber)});
             
-            phase=(phase*10^9)/(360*freqlist(plotnumber));%deg -> ns
+            phase=(deg*10^9)/(360*freqlist(plotnumber));%deg -> ns
             plim=(plim*10^9)/(360*freqlist(plotnumber));%deg -> ns
             peoval(:,1)=peoval(:,1).*(10^9/(360*freqlist(plotnumber)));%deg -> ns
 
@@ -260,24 +270,39 @@ while ~feof(plotfile)
                 hold off;
             %Generate the phase/energy plot
             teplot=subplot(2,2,4);
-                plot(phase,energy,'r.','MarkerSize',3);
+                tep.plot=plot(phase,energy,'r.','MarkerSize',3);
+                tep.nstates=1;
                 axis([plim elim]);
+                tep.axes=gca;
                 title('Longitudinal Phase Space');
-                xlabel('Time (ns)');
-                ylabel('Relative Energy (MeV)');
+                tep.paxislabel=xlabel('Time (ns)');
+                set(tep.paxislabel,'UserData','ns');
+                tep.eaxislabel=ylabel('Relative Energy (MeV)');
+                set(tep.eaxislabel,'UserData','Rel');
                 grid on;
                 hold on;                
                 %Add histograms and widths
                 [pelements,pcenters]=hist(phase,50);
                 [eelements,ecenters]=hist(energy,50);
-                pephist=plot(pcenters,(pelements/max(pelements))*.25*(elim(2)-elim(1))+elim(1));
-                peehist=plot((eelements/max(eelements))*.25*(plim(2)-plim(1))+plim(1),ecenters);
-                profiletext=sprintf('Phase 3\\sigma FW: %g\nEnergy 3\\sigma FW: %g\n',...
-                    6*std(phase),6*std(energy));
-                tet=text(plim(2),elim(2),profiletext,'HorizontalAlignment','right',...
+                tep.pephist=plot(pcenters,...
+                    (pelements/max(pelements))*.25*(elim(2)-elim(1))+elim(1));
+                tep.peehist=plot((eelements/max(eelements))*.25*(plim(2)-plim(1))+plim(1),ecenters);
+                tep.peoval=plot(peoval(:,1),peoval(:,2),'-g');
+                tep.ewidth=6*std(energy);
+                tep.ewidthpct=6*std(100*energy/plotrpenergy);
+                tep.pwidth=6*std(phase);
+                tep.pwidthdeg=6*std(deg);
+                tep.ewidthtext=[num2str(tep.ewidth) ' MeV'];
+                tep.pwidthtext=[num2str(tep.pwidth) ' ns'];
+                profiletext=sprintf('Phase 3\\sigma FW: %s\nEnergy 3\\sigma FW: %s\n',...
+                    tep.pwidthtext,tep.ewidthtext);
+                tep.tet=text(plim(2),elim(2),profiletext,'HorizontalAlignment','right',...
                     'VerticalAlignment','top','FontSize',8);
-                set(gca,'ButtonDownFcn', {@mouseclick_callback,tet,pephist,peehist});
-                plot(peoval(:,1),peoval(:,2),'-g')
+                set(gca,'ButtonDownFcn',...
+                    {@mouseclick_callback,tep.tet,tep.pephist,tep.peehist});
+                set (tep.paxislabel,'ButtonDownFcn',{@changepaxis,tep,phase,deg});
+                set (tep.eaxislabel,...
+                        'ButtonDownFcn',{@changeeaxis,tep,energy,plotrpenergy});
                 hold off;
             suptitle(plottitle);
             if (nargin>=2) 
@@ -384,13 +409,14 @@ while ~feof(plotfile)
             fgetl(plotfile);%Indicates plot type?
             fgetl(plotfile);%Indicates charge state?
             plottitle=strtrim(fgetl(plotfile));
+            plotrpenergy=getplotenergy(plottitle);
             %read in x x' limits
             linein=fgetl(plotfile);
             limits=strsplit(strtrim(linein));
             xlim=[str2num(limits{1}) str2num(limits{2})];
             xplim=[str2num(limits{3}) str2num(limits{4})];
             %Read in x x' fitted oval
-            xxpoval=[];
+            xxpoval=zeros(201,2);
             for i=1:201
                 linein=fgetl(plotfile);
                 xxpoval=[xxpoval;str2double(strsplit(strtrim(linein)))];
@@ -447,13 +473,13 @@ while ~feof(plotfile)
             %Read in phase and energy data
             linein=fgetl(plotfile);
             npart=uint32(str2double(strtrim(linein)));
-            phase=zeros(1,npart);
+            deg=zeros(1,npart);
             energy=zeros(1,npart);
             pechg=zeros(1,npart);
             for i=1:npart;
                 linein=fgetl(plotfile);
                 pe=strsplit(strtrim(linein));
-                phase(i)=str2double(pe{1});
+                deg(i)=str2double(pe{1});
                 energy(i)=str2double(pe{2});
                 pechg(i)=str2double(pe{3});
             end
@@ -473,7 +499,7 @@ while ~feof(plotfile)
             %REACTIVATE THESE WHEN (if?) MULTI-CHARGE STATE EXPORT IMPLIMENTED
             wm2=uimenu(toolsmenu,'Label',...
                 'Write Particle Distribution to File','Callback',...
-                {@write_distribution,x,xp,y,yp,phase,energy,freqlist(plotnumber),xchg},...
+                {@write_distribution,x,xp,y,yp,deg,energy,freqlist(plotnumber),xchg},...
                 'Accelerator','D','Separator','on');
 %            wm3=uimenu(toolsmenu,'Label',...
 %                'Export COSY Distribution File','Callback',...
@@ -482,7 +508,7 @@ while ~feof(plotfile)
 %                'Export TRACK Distribution File','Callback',...
 %                {@write_track_distribution,x,xp,y,yp,phase,energy,freqlist(plotnumber)});
 
-            phase=(phase*10^9)/(360*freqlist(plotnumber)); %deg -> ns
+            phase=(deg*10^9)/(360*freqlist(plotnumber)); %deg -> ns
             plim=(plim*10^9)/(360*freqlist(plotnumber)); %deg -> ns
             peoval(:,1)=peoval(:,1).*(10^9/(360*freqlist(plotnumber)));%deg -> ns
             
@@ -581,31 +607,46 @@ while ~feof(plotfile)
             teplot=subplot(2,2,4);
                 %plot(phase,energy,'r.','MarkerSize',3);
                 %scatter(phase,energy,1,pechg,'filled');
+                tep.nstates=nstates;
                 for j=1:nstates
-                    chindex=find(xchg==chgvals(j));
-                    scatter(phase(chindex),energy(chindex),1,colors(j,:),'filled');
+                    tep.chindex{j}=find(xchg==chgvals(j));
+                    tep.plot(j)=scatter(phase(tep.chindex{j}),...
+                        energy(tep.chindex{j}),1,colors(j,:),'filled');
                     hold on
                 end
                 axis([plim elim]);
+                tep.axes=gca;
                 title('Longitudinal Phase Space');
-                xlabel('Time (ns)');
-                ylabel('Relative Energy (MeV)');
+                tep.paxislabel=xlabel('Time (ns)');
+                set(tep.paxislabel,'UserData','ns');
+                tep.eaxislabel=ylabel('Relative Energy (MeV)');
+                set(tep.eaxislabel,'UserData','Rel');
                 grid on;
                 hold on;
                 %Add histograms and widths
                 [pelements,pcenters]=hist(phase,50);
                 [eelements,ecenters]=hist(energy,50);
-                pephist=plot(pcenters,(pelements/max(pelements))*.25*(elim(2)-elim(1))+elim(1));
-                peehist=plot((eelements/max(eelements))*.25*(plim(2)-plim(1))+plim(1),ecenters);
-                profiletext=sprintf('Phase 3\\sigma FW: %g\nEnergy 3\\sigma FW: %g\n',...
-                    6*std(phase),6*std(energy));
-                tet=text(plim(2),elim(2),profiletext,'HorizontalAlignment','right',...
+                tep.pephist=plot(pcenters,(pelements/max(pelements))*.25*(elim(2)-elim(1))+elim(1));
+                tep.peehist=plot((eelements/max(eelements))*.25*(plim(2)-plim(1))+plim(1),ecenters);
+                tep.peoval=plot(peoval(:,1),peoval(:,2),'-g') ;
+                tep.ewidth=6*std(energy);
+                tep.ewidthpct=6*std(100*energy/plotrpenergy);
+                tep.pwidth=6*std(phase);
+                tep.pwidthdeg=6*std(deg);
+                tep.ewidthtext=[num2str(6*std(energy)) ' MeV'];
+                tep.pwidthtext=[num2str(6*std(phase)) ' ns'];
+                profiletext=sprintf('Phase 3\\sigma FW: %s\nEnergy 3\\sigma FW: %s\n',...
+                    tep.pwidthtext,tep.ewidthtext);
+                tep.tet=text(plim(2),elim(2),profiletext,'HorizontalAlignment','right',...
                     'VerticalAlignment','top','FontSize',8);
-                set(gca,'ButtonDownFcn', {@mouseclick_callback,tet,pephist,peehist});
-                plot(peoval(:,1),peoval(:,2),'-g')
+                set(gca,'ButtonDownFcn', {@mouseclick_callback,tep.tet,tep.pephist,tep.peehist});
+                set (tep.paxislabel,'ButtonDownFcn',{@changepaxis,tep,phase,deg});
+                set (tep.eaxislabel,...
+                        'ButtonDownFcn',{@changeeaxis,tep,energy,plotrpenergy});                
                 hold off;
             suptitle(plottitle);
             if (nargin>=2) 
+                %If we're only plotting one graph, clean up and exit.
                 fclose(plotfile);
                 return 
             end;
@@ -614,6 +655,118 @@ while ~feof(plotfile)
 end
 
 fclose(plotfile);
+
+function tep=changepaxis(~,~,tep,phase,deg)
+    paxistype=get(tep.paxislabel,'UserData');
+    eaxistype=get(tep.eaxislabel,'UserData');
+    if strcmp(eaxistype,'Pct')
+        tep.ewidthtext=[num2str(tep.ewidthpct) ' %'];
+    else
+        tep.ewidthtext=[num2str(tep.ewidth) ' MeV'];
+    end
+    set(tep.axes,'XLimMode','auto');
+        if strcmp(paxistype,'ns')
+            set(tep.peehist,'Visible','off');
+            set(tep.pephist,'Visible','off');
+            set(tep.peoval,'Visible','off');
+            if tep.nstates==1
+                set(tep.plot,'Xdata',deg);
+                tep.pwidthtext=[num2str(tep.pwidthdeg) ' deg'];
+            else
+                for j=1:tep.nstates
+                    set(tep.plot(j),'Xdata',deg(tep.chindex{j}))
+                end
+                tep.pwidthtext=[num2str(tep.pwidthdeg) ' deg'];
+            end
+            set(tep.paxislabel,'String','Phase (deg)');
+            set(tep.paxislabel,'UserData','deg');      
+        else
+            if strcmp(eaxistype,'Rel')
+                set(tep.peehist,'Visible','on');
+                set(tep.pephist,'Visible','on');
+                set(tep.peoval,'Visible','on');
+            end
+            if tep.nstates==1
+                set(tep.plot,'Xdata',phase);
+                tep.pwidthtext=[num2str(tep.pwidth) ' ns'];
+            else
+                for j=1:tep.nstates
+                    set(tep.plot(j),'Xdata',phase(tep.chindex{j}))                    
+                end
+                tep.pwidthtext=[num2str(tep.pwidth) ' ns'];
+            end
+            set(tep.paxislabel,'String','Time (ns)');
+            set(tep.paxislabel,'UserData','ns');
+        end
+        profiletext=sprintf('Phase 3\\sigma FW: %s\nEnergy 3\\sigma FW: %s\n',...
+                    tep.pwidthtext,tep.ewidthtext); 
+        plim=xlim;
+        elim=ylim;
+        set(tep.tet,'Position',[plim(2) elim(2)]) ;
+        set(tep.tet,'String',profiletext);
+        
+function tep=changeeaxis(~,~,tep,energy,rpenergy)
+    paxistype=get(tep.paxislabel,'UserData');
+    eaxistype=get(tep.eaxislabel,'UserData');
+    if strcmp(paxistype,'ns')
+        tep.pwidthtext=[num2str(tep.pwidth) ' ns'];
+    else
+        tep.pwidthtext=[num2str(tep.pwidthdeg) ' deg'];
+    end
+    set(tep.axes,'YLimMode','auto');
+        if strcmp(eaxistype,'Rel')
+            %Rel->Percent
+            set(tep.peehist,'Visible','off');
+            set(tep.pephist,'Visible','off');
+            set(tep.peoval,'Visible','off');
+            pctdata=100*(energy/rpenergy);
+            if tep.nstates==1
+                set(tep.plot,'Ydata',pctdata);
+                tep.ewidthtext=[num2str(tep.ewidthpct) ' %'];
+            else
+                for j=1:tep.nstates
+                    set(tep.plot(j),'Ydata',pctdata(tep.chindex{j}));                    
+                end
+                tep.ewidthtext=[num2str(tep.ewidthpct) ' %'];
+            end
+            set(tep.eaxislabel,'String','dW/W (%)');
+            set(tep.eaxislabel,'UserData','Pct');
+        elseif strcmp(eaxistype,'Pct')
+            %Percent->Abs
+            if tep.nstates==1
+                set(tep.plot,'Ydata',energy+rpenergy);
+                tep.ewidthtext=[num2str(tep.ewidth) ' MeV'];
+            else
+                for j=1:tep.nstates
+                    set(tep.plot(j),'Ydata',rpenergy+energy(tep.chindex{j}))                    
+                end
+                tep.ewidthtext=[num2sr(tep.ewidth) 'MeV'];
+            end
+            set(tep.eaxislabel,'String','Energy (MeV)');
+            set(tep.eaxislabel,'UserData','Abs');
+        else
+            %Abs->Rel
+            if strcmp(paxistype,'ns')
+                set(tep.peehist,'Visible','on');
+                set(tep.pephist,'Visible','on');
+                set(tep.peoval,'Visible','on');
+            end
+            if tep.nstates==1
+                set(tep.plot,'Ydata',energy);
+            else
+                for j=1:tep.nstates
+                    set(tep.plot(j),'Ydata',energy(tep.chindex{j}))
+                end
+            end
+            set(tep.eaxislabel,'String','Relative Energy (MeV)');
+            set(tep.eaxislabel,'UserData','Rel');
+        end   
+        profiletext=sprintf('Phase 3\\sigma FW: %s\nEnergy 3\\sigma FW: %s\n',...
+             tep.pwidthtext,tep.ewidthtext); 
+        plim=xlim;
+        elim=ylim;
+        set(tep.tet,'Position',[plim(2) elim(2)])
+        set(tep.tet,'String',profiletext);
 
 function hout=suptitle(str, fs)
 %SUPTITLE Puts a title above all subplots.
@@ -786,7 +939,7 @@ function write_distribution(gcbo, ~, x, xp, y, yp, phase, energy, freq, varargin
     df=fopen([distfilepath distfile],'w');
     %Header Line
     freq=freq*10^-6; %Hz -> MHz
-    fprintf(df,'%12d   %18.16f    %22.15f\r\n',length(x),0,freq);
+    fprintf(df,'%12d   %18.16f    %22.15f  %22.15f\r\n',length(x),0,freq,refenergy);
     xp = xp*10^-3; % mrad -> rad
     yp = yp*10^-3; % mrad -> rad
     phase=phase*2*pi/360; %deg -> rad
@@ -803,15 +956,9 @@ function write_cosy_distribution(gcbo, eventdata, x, xp, y, yp, phase, energy, f
     plotname=get(gcbf,'Name');
 
     %Select Output File
-    if ispc
-    [distfile,distfilepath]=uiputfile('Particle Distributions\*.*',...
+    [distfile,distfilepath]=uiputfile(['Particle Distributions' filesep '*.*'],...
         'Name Saved Distribution File',...
-        ['Particle Distributions\' plotname '_COSY.pos']);
-    else
-    [distfile,distfilepath]=uiputfile('Particle Distributions/*.*',...
-        'Name Saved Distribution File',...
-        ['Particle Distributions/' plotname '_COSY.pos']);        
-    end
+        ['Particle Distributions' filesep plotname '_COSY.pos']);
     
     %Get energy from 'Dynac.long'
     longdata=fileread('dynac.long');
@@ -852,15 +999,9 @@ function write_cosy_distribution(gcbo, eventdata, x, xp, y, yp, phase, energy, f
     plotname=get(gcbf,'Name');
     
     %Select Output File
-    if ispc
-    [distfile,distfilepath]=uiputfile('Particle Distributions\*.*',...
+     [distfile,distfilepath]=uiputfile(['Particle Distributions' filesep '*.*'],...
         'Name Saved Distribution File',...
-        ['Particle Distributions\read_dis_' plotname '.dst']);
-    else
-    [distfile,distfilepath]=uiputfile('Particle Distributions/*.*',...
-        'Name Saved Distribution File',...
-        ['Particle Distributions/read_dis_' plotname '.dst']);        
-    end
+        ['Particle Distributions' filesep 'read_dis_' plotname '.dst']);
     
     %Get energy,charge, and mass from 'Dynac.long'
     dynaclong=fopen('dynac.long');
@@ -901,6 +1042,37 @@ function write_cosy_distribution(gcbo, eventdata, x, xp, y, yp, phase, energy, f
     
     fclose(df);
     
+function plotrpenergy=getplotenergy(plotname)
+    %Retrieve the energy for a given plot name from "dynac.short"
+    
+     if ~exist('dynac.short','file')==2
+         %If dynac.short doesn't exist, return -1
+         plotrpenergy=-1;
+         return
+     end
+     
+     dsfile=fopen('dynac.short');
+     fileline=fgetl(dsfile);
+     while isempty(strfind(fileline,plotname))
+         if feof(dsfile)
+             plotrpenergy=-1;
+             return
+         end
+         fileline=fgetl(dsfile);
+     end
+     
+     %Skip two lines
+     fileline=fgetl(dsfile);
+     fileline=fgetl(dsfile);
+     
+     %READ ALL THE DATA!
+        C=strsplit(fileline,'\s*',...
+            'DelimiterType','RegularExpression');
+        plotrpenergy=str2double(C{3});
+
+        fclose(dsfile);
+         
+    
     function showdata(gcbo, ~, title)
         %Show corresponding data from dynac.short for an emittance plot
         
@@ -913,22 +1085,22 @@ function write_cosy_distribution(gcbo, eventdata, x, xp, y, yp, phase, energy, f
         end
         
         %Scan for the plot title
-        line=fgetl(dsfile);
-        while isempty(strfind(line,title))
+        fileline=fgetl(dsfile);
+        while isempty(strfind(fileline,title))
             if feof(dsfile) %Throw an error if end of file is reached w/o finding it
                 disp(['Error: Plot data for ' title 'not found']);
                 fclose(dsfile);
                 return
             end
-            line=fgetl(dsfile);
+            fileline=fgetl(dsfile);
         end
         
         %Skip two lines
-        line=fgetl(dsfile);
-        line=fgetl(dsfile);
+        fileline=fgetl(dsfile);
+        fileline=fgetl(dsfile);
         
         %READ ALL THE DATA!
-        C=strsplit(line,'\s*',...
+        C=strsplit(fileline,'\s*',...
             'DelimiterType','RegularExpression');
         out.betarp=C{2};
         out.energyrp=C{3};
@@ -937,15 +1109,15 @@ function write_cosy_distribution(gcbo, eventdata, x, xp, y, yp, phase, energy, f
         out.tofcog=C{6};
         out.eoffsetcog=C{7};
         out.toffsetcog=C{8};
-        line=fgetl(dsfile);
-        C=strsplit(line,'\s*',...
+        fileline=fgetl(dsfile);
+        C=strsplit(fileline,'\s*',...
             'DelimiterType','RegularExpression');
         out.xcog=C{2};
         out.xpcog=C{3};
         out.ycog=C{4};
         out.ypcog=C{5};
-        line=fgetl(dsfile);
-        C=strsplit(line,'\s*',...
+        fileline=fgetl(dsfile);
+        C=strsplit(fileline,'\s*',...
             'DelimiterType','RegularExpression');
         out.alphax=C{2};
         out.betax=C{3};
@@ -953,31 +1125,31 @@ function write_cosy_distribution(gcbo, eventdata, x, xp, y, yp, phase, energy, f
         out.betay=C{5};
         out.alphaznskev=C{6};
         out.betaznskev=C{7};
-        line=fgetl(dsfile);
-        C=strsplit(line,'\s*',...
+        fileline=fgetl(dsfile);
+        C=strsplit(fileline,'\s*',...
             'DelimiterType','RegularExpression');
         out.alphazdegkev=C{2};
         out.betazdegkev=C{3};
         out.emitzdegkev=C{4};
         out.freq=C{6};
-        line=fgetl(dsfile);
-        C=strsplit(line,'\s*',...
+        fileline=fgetl(dsfile);
+        C=strsplit(fileline,'\s*',...
             'DelimiterType','RegularExpression');
         out.dphi=C{2};
         out.dw=C{3};
         out.rphie=C{4};
         out.emitznskev=C{5};
         out.particles=C{7};
-        line=fgetl(dsfile);
-        C=strsplit(line,'\s*',...
+        fileline=fgetl(dsfile);
+        C=strsplit(fileline,'\s*',...
             'DelimiterType','RegularExpression');
         out.dx=C{2};
         out.dxp=C{3};
         out.rxxp=C{4};
         out.emitxnorm=C{5};
         out.emitxnon=C{8};
-        line=fgetl(dsfile);
-        C=strsplit(line,'\s*',...
+        fileline=fgetl(dsfile);
+        C=strsplit(fileline,'\s*',...
             'DelimiterType','RegularExpression');
         out.dy=C{2};
         out.dyp=C{3};

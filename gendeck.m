@@ -75,40 +75,75 @@ function [settings,freqlist]=gendeck(outputfilename,settings,layoutfilename,devi
 %7/15/15 - Added some desperately need error checking.  Now fails
 %           gracefully if you have a device in your layout
 %           thats not in your devices file.
+%7/24/15 - Added support for fractional rejection limits rather than
+%absolute value.
+%10/29/15 - Added support for "ACCEPT" card
+%11/3/15 - Removed a specific check for "Edflec" variable in favor of a
+%           general check for DynacVersion.
+%        - For Dynac r15 and up, WRBEAM now writes reference particle
+%        energy
+%        - For Dynac r15 and up all REJECT cards now default to rejecting
+%        relative to the reference particle, not the center of gravity of
+%        the bunch.
+%11/13/15 - "Compiled Successfully" message forces output color to black.
+%12/23/15 - Made integration steps across a cavity a settable parameter
 
 %To Do
 %       Put some error checking in Zones in case of incorrect numbers of
 %       input parameters.
 
-%-----Default Parameters----% (Only used if not defined in .ini file)
+%-----Default Parameters----% (Included for legacy compatibility only - default
+%                                   values are now set in main DynacGUI.m)
 RFQreject=0.5; %Fractional deviation from average energy to be rejected after RFQ. Note
               %that this is from the average INCLUDING the unaccelerated
-              %beam. 
+              %beam. (Fixed to relative to RP for Dynac v. 15 and up)
 esectors=10; %Number of sectors for electrostatic bending elements
 bsectors=10; %Number of sectors for magnetic bending elements
+csectors=8; %Number of integration steps in cavities
 %Default REJECT values
-%Energy[MeV] Phase[deg] X[cm] Y[cm] R[cm] - All are 1/2 widths
-reject=[1000 4000 100 100 400];
+%Energy[Flag] Phase[deg] X[cm] Y[cm] R[cm] Flag - All are 1/2 widths
+%Flag=1, Energy is absolute value in MeV from cog.
+%Flag=0, Energy is fractional deviation from cog.
+%Flag=11, Energy is absolute deviation from RP.
+%Flag=10, Energy is fractional deviation from RP.
+reject=[1000 4000 100 100 400 11]; 
 
 %Define DynacGUI Window, get handles
 figtag = 'DynacGUI';
 guifig = findobj(allchild(0),'flat','Tag',figtag);
 guihand = guidata(guifig);
 
-%Adjust parameters from .ini file
-if isfield(guihand.inivals,'RFQreject')
+%Adjust parameters from .ini file or defaults set in DynacGUI.m
+if isfield(guihand.inivals,'RFQreject') %RFQ Rejection threshhold
     RFQreject=str2double(guihand.inivals.RFQreject);
 end
-if isfield(guihand.inivals,'Esectors')
+if isfield(guihand.inivals,'Esectors') %Number of sectors for E deflectors
     esectors=str2double(guihand.inivals.Esectors);
 end
-if isfield(guihand.inivals,'Bsectors')
+if isfield(guihand.inivals,'Bsectors') %Number of sectors for B deflectors
     bsectors=str2double(guihand.inivals.Bsectors);
+end
+if isfield(guihand.inivals,'Csectors') %Number of integration steps for cavities
+    csectors=str2double(guihand.inivals.Csectors);
+end
+
+%Dynac version specific checks
+if isfield(guihand,'dynac_version') %Dynac version (default = 14)
+    dynac_version=guihand.dynac_version;
+else
+    dynac_version=14;
+end
+if dynac_version<=12 %Set E deflector type based on version
+    edflectype=3;
+else
+    edflectype=4;
+end
+if dynac_version<=14 %For versions without RP referencing, use cog in all cases
+    reject(6)=mod(reject(6),10);
 end
 
 clearerror(guihand);
 runfreq=settings.RF; %Initial Frequency of line
-edflectype=checkedflec(guihand); %which version of electrostatic deflector to use
 freqlist=[];
 unitstruct=structfun(@(x)([]),settings,'UniformOutput',0);
 unitstruct.A='[AMU]';
@@ -282,6 +317,24 @@ while ~feof(layoutfile)
     end
     card=regexp(line,'\t','split');
     switch card{1,1}
+        case 'ACCEPT' %Acceptance plots
+            if ~checkdevice(card{1,2},devicetypes); continue; end;
+            id=find(strcmp(card{1,2},devicetypes));
+            xlim=devices{id,1}{1,3};
+            xplim=devices{id,1}{1,4};
+            zlim=devices{id,1}{1,5};
+            zplim=devices{id,1}{1,6};
+            fprintf(outfile,'ACCEPT\r\n');
+            fprintf(outfile,'%s\r\n',card{1,3});
+            fprintf(outfile,'%s %s\r\n','1',devices{id,1}{1,2});
+            fprintf(outfile,'%s %s %s %s %s %s %s %s\r\n',...
+                xlim,xplim,xlim,xplim,xlim,xlim,zlim,zplim);
+            fprintf(outfile,'%s\r\n',card{1,4});
+            fprintf(outfile,'%s %s\r\n','1',devices{id,1}{1,2});
+            fprintf(outfile,'%s %s %s %s %s %s %s %s\r\n',...
+                xlim,xplim,xlim,xplim,xlim,xlim,zlim,zplim);
+            freqlist=[freqlist runfreq runfreq];
+            i=i+2;
         case 'BMAGNET' %Bending Magnet
             if ~checkdevice(card{1,2},devicetypes); continue; end;
             id=find(strcmp(card{1,2},devicetypes));
@@ -352,8 +405,8 @@ while ~feof(layoutfile)
             end
             fprintf(outfile,'%s\r\n','CAVNUM');
             fprintf(outfile,'%s\r\n','1');%dummy variable
-            fprintf(outfile,'%s %g %g %s %s\r\n','0',settings.(card{1,4}),...
-                settings.(card{1,3})-100,'8','1');
+            fprintf(outfile,'%s %g %g %g %s\r\n','0',settings.(card{1,4}),...
+                settings.(card{1,3})-100,csectors,'1');
             unitstruct.(card{1,3})='[%]';
             unitstruct.(card{1,4})='[deg]';
         %case 'CAVSC' %Single symmetric accelerating cavity
@@ -502,15 +555,24 @@ while ~feof(layoutfile)
         case 'REJECT' %Reject Card (used for apertures, slits, etc.)
             if ~checkdevice(card{1,2},devicetypes); continue; end;
             id=find(strcmp(card{1,2},devicetypes));
+            for i=2:6
+                reject(i-1)=str2double(devices{id,1}{1,i});
+            end
+            if reject(1)<0 
+                %If energy value is negative, interpret as fractional
+                %rather than absolute deviation. Use this information to
+                %set the reject type flag, which is reject(6).
+                reject(6)=0;
+                reject(1)=abs(reject(1));
+            else
+                reject(6)=1;
+            end
+            if dynac_version>=15
+                reject(6)=reject(6)+10;
+            end
             fprintf(outfile,'%s\r\n','REJECT');
-            fprintf(outfile,'1 %s %s %s %s %s\r\n',devices{id,1}{1,2},...
-                devices{id,1}{1,3}, devices{id,1}{1,4},...
-                devices{id,1}{1,5},devices{id,1}{1,6});
-            reject=[str2double(devices{id,1}{1,2}),...
-                str2double(devices{id,1}{1,3}),...
-                str2double(devices{id,1}{1,4}),...
-                str2double(devices{id,1}{1,5}),...
-                str2double(devices{id,1}{1,6})];
+            fprintf(outfile,'%g %g %g %g %g %g\r\n',reject(6), reject(1),...
+                reject(2),reject(3),reject(4),reject(5));
         case 'REFCOG'
             fprintf(outfile,'%s\r\n','REFCOG');
             fprintf(outfile,'%s\r\n',card{1,2});
@@ -592,11 +654,16 @@ while ~feof(layoutfile)
             fprintf(outfile,'%g %g %g %s\r\n',settings.(card{1,3})-100,...
                 settings.(card{1,3})-100,rfqphaseoffset,'180');
             fprintf(outfile,'%s\r\n','REJECT');
-            fprintf(outfile,'0 %g %g %g %g %g\r\n', RFQreject, reject(2),...
+            if dynac_version>=15
+                rflag=10;
+            else
+                rflag=0;
+            end
+            fprintf(outfile,'%g %g %g %g %g %g\r\n', rflag, RFQreject, reject(2),...
                 reject(3), reject(4), reject(5));
             fprintf(outfile,'DRIFT\r\n.00001\r\n');
             fprintf(outfile,'%s\r\n','REJECT');
-            fprintf(outfile,'1 %g %g %g %g %g\r\n',reject(1), reject(2),...
+            fprintf(outfile,'%g %g %g %g %g %g\r\n',reject(6), reject(1), reject(2),...
                 reject(3), reject(4), reject(5));       
             fprintf(outfile,'%s\r\n','REFCOG');
             fprintf(outfile,'%s\r\n','0');
@@ -674,11 +741,11 @@ while ~feof(layoutfile)
             end            
             fprintf(outfile,'%s\r\n','REJECT');
             %factor of /2 is because Dynac uses half widths here
-            fprintf(outfile,'1 %g %g %g %g %g\r\n',reject(1), reject(2),...
+            fprintf(outfile,'%g %g %g %g %g %g\r\n',reject(6), reject(1), reject(2),...
                 settings.(card{1,2})/2., settings.(card{1,3})/2., reject(5));
             fprintf(outfile,'DRIFT\r\n.00001\r\n');
             fprintf(outfile,'%s\r\n','REJECT');
-            fprintf(outfile,'1 %g %g %g %g %g\r\n',reject(1), reject(2),...
+            fprintf(outfile,'%g %g %g %g %g %g\r\n',reject(6), reject(1), reject(2),...
                 reject(3), reject(4), reject(5));
             unitstruct.(card{1,2})='[cm]';
             unitstruct.(card{1,3})='[cm]';
@@ -738,7 +805,11 @@ while ~feof(layoutfile)
         case 'WRBEAM' %Write beam file
             fprintf(outfile,'%s\r\n','WRBEAM');
             fprintf(outfile,'%s\r\n',card{1,2});
-            fprintf(outfile,'%s %s\r\n','1','2');
+            if dynac_version<=14
+                fprintf(outfile,'1 2\r\n');
+            else %For Dynac versions >15 write the RP energy
+                fprintf(outfile,'1 102\r\n');
+            end
         case 'ZONES' %Start tracking RMS zones
             if ~checkdevice(card{1,2},devicetypes); continue; end;
             id=find(strcmp(card{1,2},devicetypes)); %Get zone type
@@ -772,7 +843,7 @@ errorflag=0;
 %Store unit list in user data field of edit tune button.
 set(guihand.showsettings_button,'UserData',unitstruct);
 if isempty(get(guihand.dynac_output_textbox,'String'))
-    disperror(['Deck generated successfully at ' datestr(now)]);
+    disperror(['Deck generated successfully at ' datestr(now)],1,'k');
 end
 
 fclose all;
@@ -783,22 +854,18 @@ function disperror(errortext,varargin)
 figtag = 'DynacGUI';
 guifig = findobj(allchild(0), 'flat','Tag', figtag);
 guihand = guidata(guifig);
-if (nargin==1 || varargin{1}==0)
+if (nargin>=1 || varargin{1}==0)
     set(guihand.dynac_output_textbox,'String',errortext);
 elseif varargin{1}==1
     errortext=[get(guihand.dynac_output_textbox,'String'); {errortext}];
     set(guihand.dynac_output_textbox,'String',errortext);
 end
+if (nargin>=2)
+    set(guihand.dynac_output_textbox,'ForegroundColor',varargin{2})
+end
 
 function clearerror(guihand)
 set(guihand.dynac_output_textbox,'String',{});
-
-function out=checkedflec(guihand)
-if isfield(guihand.inivals,'Edflec')
-    out=str2num(guihand.inivals.Edflec);
-else
-    out=4;
-end
 
 function cd=checkdevice(deviceid,devicelist)
 %checks a device list for the presence of the given device.  Throws an

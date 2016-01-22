@@ -1,5 +1,5 @@
 function [settings]=rescaletune(settings,layoutfilename,devicefilename,...
-    escale,bscale,cavscale)
+    escale,bscale,cavscale,startline,endline)
 % Tune Rescaling Utility for DynacGUI
 %
 % Reads in a layout file, device type file, and array of settings,
@@ -19,8 +19,11 @@ function [settings]=rescaletune(settings,layoutfilename,devicefilename,...
 %Update Log
 %8/25/14 Created with gendeck.m as a starting point.
 %10/14/14 Added separate cavity scaling factor
+%7/29/15 Can now rescale partial beamlines.
+%        Added a bunch of new devices.
 %
 %To Do: allow scaling for benders with manually set fields.
+%To Do: add all the new devices
 
 devicefile=fopen(devicefilename);
 i=1;
@@ -35,10 +38,12 @@ fclose(devicefile);
 %scan layout file
 layoutfile=fopen(layoutfilename);
 
-%Default REJECT values
-%Energy[MeV] Phase[deg] X[cm] Y[cm] R[cm] - All are 1/2 widths
-
+i=1;
 while ~feof(layoutfile)
+    if i < startline %If we haven't reached the starting line yet, skip.
+        i=i+1;
+        continue
+    end
     line=fgetl(layoutfile);
     card=regexp(line,'\t','split');
     switch card{1,1}
@@ -67,8 +72,6 @@ while ~feof(layoutfile)
             elseif isfield(settings,(card{1,3})) && ~isempty(settings.(card{1,3}))
                 %If the field is present and not empty, scale the efield
                 settings.(card{1,3})=settings.(card{1,3})*cavscale;
-            else %Otherwise use nominal value
-                efield=-1;
             end
         case 'EMIT' %Dump beam data to dynac.short
             %Do nothing
@@ -76,6 +79,8 @@ while ~feof(layoutfile)
             %Do nothing
         case 'ENVEL' %Envelope Plot
             %Do nothing
+        case 'FSOLE' %Solenoid with extenal field
+            settings.(card{1,3})=settings.(card{1,3})*bscale;
         case 'NEWF' %New Frequency in Hz
             %Do nothing
         case 'NREF' %New Reference Particle
@@ -83,6 +88,9 @@ while ~feof(layoutfile)
         case 'QUADRUPO' %Magnetic Quadrupole
             %Rescale Quadrupole Field
             settings.(card{1,3})=settings.(card{1,3})*bscale;
+        case 'QUADSXT' %Combined magnetic Quad and Sextupole
+            settings.(card{1,3})=settings.(card{1,3})*bscale;
+            settings.(card{1,4})=settings.(card{1,4})*bscale;
         case 'QUAELEC' %Electrostatic Quad
             %Rescale Electric Quadruple Field
             settings.(card{1,3})=settings.(card{1,3})*escale;
@@ -102,11 +110,16 @@ while ~feof(layoutfile)
             %Do nothing        
         case 'SCPOS' %Space charge position in cavities
             %Do nothing
+        case 'SEXTUPO' %Magnetic Sextupole
+            settings.(card{1,3})=settings.(card{1,3})*bscale;
         case 'SLIT' %Horizontal or vertical slit
             %Do nothing
         case 'SOLENO' %Solenoid
             %Rescale Solenoid field
             settings.(card{1,3})=settings.(card{1,3})*bscale;
+        case 'SOQUAD' %Combined magnetic solenoid and quadrupole
+            settings.(card{1,3})=settings.(card{1,3})*bscale;
+            settings.(card{1,4})=settings.(card{1,4})*bscale;
         case 'STEER' %Steerer            
             %Note that electrostatic steerers are NOT in the official
             %Dynac release as of 4/16/14.
@@ -123,7 +136,12 @@ while ~feof(layoutfile)
             %Do nothing
         case '' %empty string - do nothing
         otherwise
-            disperror(['Error: unrecognized device type ' card{1,1}]);
+            %Other device type - do nothing.  Will this cause problems?
+            %disperror(['Error: unrecognized device type ' card{1,1}]);
+    end
+    i=i+1;
+    if i==endline+1 %if we are now past the ending line, quit.
+        break;
     end
 end
 
