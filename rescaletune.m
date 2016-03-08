@@ -28,8 +28,8 @@ function [settings]=rescaletune(settings,layoutfilename,devicefilename,...
 devicefile=fopen(devicefilename);
 i=1;
 while ~feof(devicefile)
-    line=fgetl(devicefile);
-    devices{i,:}=regexp(line,'\t','split');
+    linein=fgetl(devicefile);
+    devices{i,:}=regexp(linein,'\t','split');
     i=i+1;
 end
 devicetypes=cellfun(@(x) x{1},devices,'UniformOutput',false);
@@ -41,11 +41,12 @@ layoutfile=fopen(layoutfilename);
 i=1;
 while ~feof(layoutfile)
     if i < startline %If we haven't reached the starting line yet, skip.
+        linein=fgetl(layoutfile);
         i=i+1;
         continue
     end
-    line=fgetl(layoutfile);
-    card=regexp(line,'\t','split');
+    linein=fgetl(layoutfile);
+    card=regexp(linein,'\t','split');
     switch card{1,1}
         case 'BMAGNET' %Bending Magnet
             %Rescale bending magnet.  Note: automatic fields remain
