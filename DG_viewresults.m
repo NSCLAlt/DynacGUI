@@ -14,6 +14,9 @@ function DG_viewresults(~,~)
 % 
 
 %Initial Version 10/22/14
+%
+%   3/15/16 - Updated to include later versions of Dynac with more
+%   available data.
 
 xsize=800;
 ysize=500;
@@ -88,7 +91,7 @@ function zplots_button_Callback(~,~)
     backgroundcolor=get(plot_window,'color');
     set(transaxes,'Position',[.05 .2 .9 .75]);
     xline=plot(transaxes,zdata.data(:,1),zdata.data(:,2),'Color','r');
-    ylabel(transaxes,'RMS Width (mm)');
+    ylabel(transaxes,'1 RMS Half Width (mm)');
     set(transaxes,'color','none');
     box(transaxes,'off');
     
@@ -97,7 +100,7 @@ function zplots_button_Callback(~,~)
     yline=plot(transaxes,zdata.data(:,1),-zdata.data(:,3),'Color','g');
     
     %Plot dashed line at x/y = 0
-    zeroline=plot(transaxes,[0,max(zdata.data(:,1))],[0,0],':k','LineWidth',.1);
+    plot(transaxes,[0,max(zdata.data(:,1))],[0,0],':k','LineWidth',.1);
     
     %Plot X beta function
     hold on;
@@ -127,7 +130,61 @@ function zplots_button_Callback(~,~)
     hold on;
     zemitline=plot(transaxes,zdata.data(:,1),zdata.data(:,8),'Color','k');
     set(zemitline,'Visible','off');
+
+    if (size(zdata.data,2)>10) %Fails for very old versions of dynac
+    %Plot X Envelope
+    hold on;
+    xenvelopeline1=plot(transaxes,zdata.data(:,1),zdata.data(:,11),'Color','r');
+    xenvelopeline2=plot(transaxes,zdata.data(:,1),zdata.data(:,12),'Color','r');
+    set(xenvelopeline1,'Visible','off');
+    set(xenvelopeline2,'Visible','off');
+    
+    %Plot Y Envelope
+    hold on;
+    yenvelopeline1=plot(transaxes,zdata.data(:,1),zdata.data(:,13),'Color','g');
+    yenvelopeline2=plot(transaxes,zdata.data(:,1),zdata.data(:,14),'Color','g');
+    set(yenvelopeline1,'Visible','off');
+    set(yenvelopeline2,'Visible','off');
+    
+    %Plot Time Spread
+    hold on;
+    tspread=1e9*(zdata.data(:,16)-zdata.data(:,15));
+    tspreadline=plot(transaxes,zdata.data(:,1),tspread,'Color','k');
+    set(tspreadline,'Visible','off');
+    
+    %Plot Energy Spread
+    hold on;
+    maxdeltae=max(abs(zdata.data(:,19)),abs(zdata.data(:,20)));
+    espread=100*(maxdeltae./zdata.data(:,9)); %Energy spread as a percentage
+    espreadline=plot(transaxes,zdata.data(:,1),espread,'Color','k');
+    set(espreadline,'Visible','off');
         
+    else %Trap old versions of Dynac with less data in "dynac.print"
+        nlines=4;
+        nullline=zeros(length(zdata.data(:,1)));
+        xenvelopeline1=plot(transaxes,zdata.data(:,1),nullline,'Color','k');
+        xenvelopeline2=plot(transaxes,zdata.data(:,1),nullline,'Color','k');
+        yenvelopeline1=plot(transaxes,zdata.data(:,1),nullline,'Color','k');
+        yenvelopeline2=plot(transaxes,zdata.data(:,1),nullline,'Color','k');
+        tspreadline=plot(transaxes,zdata.data(:,1),nullline,'Color','k');
+        espreadline=plot(transaxes,zdata.data(:,1),nullline,'Color','k');
+    end
+        
+    %Plot Dispersion
+    if (size(zdata.data,2)>=21) %Only works with beta version that includes D
+        hold on;
+        xdispline=plot(transaxes,zdata.data(:,1),zdata.data(:,21),'Color','r');
+        ydispline=plot(transaxes,zdata.data(:,1),zdata.data(:,22),'Color','g');
+        set(xdispline,'Visible','off');      
+        set(ydispline,'Visible','off');
+        nlines=10;
+    else %Fail gracefully
+        nlines=8;
+        nullline=zeros(length(zdata.data(:,1)));
+        xdispline=plot(transaxes,zdata.data(:,1),nullline,'Color','r');
+        ydispline=plot(transaxes,zdata.data(:,1),nullline,'Color','g');
+    end
+    
     %Plot energy on 2nd axis
     energyaxes=axes('Position',get(transaxes,'Position'),...
         'XaxisLocation','bottom','YAxisLocation','right',...
@@ -154,71 +211,73 @@ function zplots_button_Callback(~,~)
         ' N = ' num2str(handles.settings.Npart)];
     title(graphtitle,'FontSize',14);
     
-    %Plot Box Locations
-    %If ZOffset is defined in the tune file, that's the distance along the
-    %beamline from L016 to the start of the plot.  Only needed for box
-    %locations.
-    try
-        offset=handles.settings.ZOffset;
-    catch
-        offset=0;
-    end
-    Bbox(3)=13.531;
-    Bbox(4)=17.338;
-    Bbox(5)=19.487;
-    Bbox(6)=23.008;
-    Bbox(7)=28.204;
-    Bbox(10)=31.393;
-    Bbox(11)=34.341;
-    Bbox(13)=39.444;
-    Bbox(14)=42.486;
-    Bbox(15)=45.585;
-    Bbox(16)=49.119;
-    %Uncomment for ANASEN line
-    Bbox(17)=54.414; 
-    Bbox(18)=55.778;
-    %Uncomment for ATTPC line
-    %Bbox(19)=56.310; 
-    %Bbox(20)=57.460; %use 57.675 for second half of 20
-    Bbox(23)=0;
-    boxlinehandles=[];
-    boxlabelhandles=[];
-    h=line([8.314-offset 8.314-offset],ylim);
-    boxlinehandles=[boxlinehandles h];
-    h=text(8.314-offset,max(ylim),'L044 ','Rotation',90,...
-            'VerticalAlignment','Bottom','HorizontalAlignment','Right');
-    boxlabelhandles=[boxlabelhandles h];
-    for i=1:23
-        if (Bbox(i) ~= 0)
-            h=line([Bbox(i)-offset Bbox(i)-offset],ylim);
-            boxlinehandles=[boxlinehandles h];
-            h=text(Bbox(i)-offset,max(ylim),['Box' num2str(i) ' '],...
-                'Rotation',90,'VerticalAlignment',...
-                'Bottom','HorizontalAlignment','Right');
-            boxlabelhandles=[boxlabelhandles h];
-        end
-    end
-
-    %Edit "tposition" depending on beamline. Set to 0 for no target.
-    %59.61 = ATTPC Target location
-    %57.71 = ANASEN Target location
-    tposition = 57.71;
-    if (tposition ~= 0)
-        h=line([tposition tposition],ylim);
-        boxlinehandles=[boxlinehandles h];
-        h=text(tposition,max(ylim),'Target ','Rotation',90,...
-            'VerticalAlignment','Bottom','HorizontalAlignment','Right');
-        boxlabelhandles=[boxlabelhandles h];
+    if isfield(handles,'reaboxes') && handles.reaboxes==1
+	    %Plot Box Locations
+	    %If ZOffset is defined in the tune file, that's the distance along the
+	    %beamline from L016 to the start of the plot.  Only needed for box
+	    %locations.
+	    try
+	    	offset=handles.settings.ZOffset;
+	    catch
+	   	offset=0;
+	    end
+	    Bbox(3)=13.531;
+	    Bbox(4)=17.338;
+	    Bbox(5)=19.487;
+	    Bbox(6)=23.008;
+	    Bbox(7)=28.204;
+	    Bbox(10)=31.393;
+	    Bbox(11)=34.341;
+	    Bbox(13)=39.444;
+	    Bbox(14)=42.486;
+	    Bbox(15)=45.585;
+	    Bbox(16)=49.119;
+	    %Uncomment for ANASEN line
+	    Bbox(17)=54.414; 
+	    Bbox(18)=55.778;
+	    %Uncomment for ATTPC line
+	    %Bbox(19)=56.310; 
+	    %Bbox(20)=57.460; %use 57.675 for second half of 20
+	    Bbox(23)=0;
+	    boxlinehandles=[];
+	    boxlabelhandles=[];
+	    h=line([8.314-offset 8.314-offset],ylim);
+	    boxlinehandles=[boxlinehandles h];
+	    h=text(8.314-offset,max(ylim),'L044 ','Rotation',90,...
+	    	    'VerticalAlignment','Bottom','HorizontalAlignment','Right');
+	    boxlabelhandles=[boxlabelhandles h];
+	    for i=1:23
+	    if (Bbox(i) ~= 0)
+	    	    h=line([Bbox(i)-offset Bbox(i)-offset],ylim);
+	    boxlinehandles=[boxlinehandles h];
+	    h=text(Bbox(i)-offset,max(ylim),['Box' num2str(i) ' '],...
+	    	    'Rotation',90,'VerticalAlignment',...
+	    	    'Bottom','HorizontalAlignment','Right');
+	    boxlabelhandles=[boxlabelhandles h];
+	    end
+	    end
+	    
+	    %Edit "tposition" depending on beamline. Set to 0 for no target.
+	    %59.61 = ATTPC Target location
+	    %57.71 = ANASEN Target location
+	    tposition = 57.71;
+	    if (tposition ~= 0)
+	    	    h=line([tposition tposition],ylim);
+	    boxlinehandles=[boxlinehandles h];
+	    h=text(tposition,max(ylim),'Target ','Rotation',90,...
+	    	    'VerticalAlignment','Bottom','HorizontalAlignment','Right');
+	    boxlabelhandles=[boxlabelhandles h];
+	    end
     end
     
     %Add lines for emittance plots - this should evenutally replace the
     %hard coded box plots. (Perhaps add to the list any EMITL cards?)
     plotlinehandles=[];
     plotlabelhandles=[];
-    if isstruct(ud) && ~isempty(ud.plotzpos)
+    if isstruct(ud) && isfield(ud,'plotzpos') && ~isempty(ud.plotzpos)
         for i=1:length(ud.plotzpos);
             if ~isempty(ud.plotzpos{i})
-                h=line([ud.plotzpos{i} ud.plotzpos{i}],ylim);
+                h=line([ud.plotzpos{i} ud.plotzpos{i}],ylim,'Color','k');
                 plotlinehandles=[plotlinehandles h];
                 h=text(ud.plotzpos{i},max(ylim),ud.names{i},...
                     'Rotation',90,'VerticalAlignment',...
@@ -229,13 +288,15 @@ function zplots_button_Callback(~,~)
     end
 
     %Plot element type graphics along axis
-    for j=1:length(ud.devarray.end);        
+    for j=1:length(ud.devarray.end);
+        devlinewidth=5;
         line([ud.devarray.end(j)-ud.devarray.length(j) ud.devarray.end(j)],...
-            [0,0],'Color',ud.devarray.color(j),'LineWidth',5,'Parent',transaxes);
+            [ud.devarray.offset(j)/devlinewidth,ud.devarray.offset(j)/devlinewidth],...
+            'Color',ud.devarray.color(j),'LineWidth',devlinewidth,'Parent',transaxes);
     end
     
     %setup axes for particle number counts
-    if (size(zdata.data,2)==10)
+    if (size(zdata.data,2)>=10) %Fails on very old versions of Dynac
         particleaxes=axes('Position',get(transaxes,'Position'),...
         'XaxisLocation','bottom','YAxisLocation','right',...
         'Visible','off','Xlim',[zmin zmax],'Ylim',[0 1],...
@@ -243,14 +304,11 @@ function zplots_button_Callback(~,~)
          pline=line(zdata.data(:,1),zdata.data(:,10)/max(zdata.data(:,10)),...
             'Color','blue','Parent',particleaxes);
         %Displays particle count
-        %Note: this is hardcoded - do not trust.
-        %pcount=sprintf('L080: %g L92: %g\r\n',zdata.data(129,10),...
-        %   zdata.data(150,10));
         % This line is the particle count at the end of the line
         % and should be properly general.
         pcount=sprintf('Particles left at end: %g / %g\r\n',...
             zdata.data(length(zdata.data(:,1)),10),zdata.data(1,10));
-        text(0,0,pcount);
+        pcounttext=text(0,0,pcount);
         particles_checkbox=uicontrol(plot_window,...
             'Style','checkbox','String','Particle Count',...
             'Position',[375 20 150 30],'BackgroundColor',backgroundcolor,...
@@ -279,21 +337,36 @@ function zplots_button_Callback(~,~)
     end
     toggle_plotlabel;
     
+    if isfield(handles,'reaboxes') && handles.reaboxes==1;
     boxlabel_checkbox=uicontrol(plot_window,...
         'Style','checkbox','String','ReA3 Boxes',...
         'Position',[1060 20 200 30],'BackgroundColor',backgroundcolor,...
         'FontSize',12,'Max',1,'Value',0,'callback',@toggle_boxlabel);
     toggle_boxlabel;
+    end
     
 %    beta_checkbox=uicontrol(plot_window,...
 %        'Style','checkbox','String','Beta Functions',...
 %        'Position',[960 20 200 30],'BackgroundColor',backgroundcolor,...
 %        'FontSize',12,'Max',1,'Value',0,'callback',@toggle_beta);
 %    toggle_beta;
+
+    if nlines==10
+        zplotnames={'X/Y Profile',...
+        'X/Y Emittance','Z Emittance','X/Y Beta Functions','X Envelope',...
+        'Y Envelope','Time Spread','Energy Spread','X Dispersion','Y Dispersion',...
+        'None'};
+    elseif nlines==8
+        zplotnames={'X/Y Profile',...
+        'X/Y Emittance','Z Emittance','X/Y Beta Functions','X Envelope',...
+        'Y Envelope','Time Spread','Energy Spread','None'};
+    else
+        zplotnames={'X/Y Profile','X/Y Emittance','Z Emittance',...
+            'X/Y Beta Functions','None'};
+    end
     
-    plot_dropdown=uicontrol(plot_window,...
-        'Style','popupmenu','String',{'X/Y Envelope',...
-        'X/Y Emittance','Z Emittance','X/Y Beta Functions','None'},...
+    uicontrol(plot_window,...
+        'Style','popupmenu','String',zplotnames,...
         'Position',[20 20 200 30],'BackgroundColor','white',...
         'FontSize',12,'Value',1,'callback',@dropdown_callback);
     
@@ -319,6 +392,9 @@ function zplots_button_Callback(~,~)
     
     function dropdown_callback(src,~)
         graphtype=get(src,'Value');
+        if graphtype>nlines
+            graphtype=99;
+        end
         yaxislabel=get(transaxes,'ylabel');
         set(xline,'Visible','off')
         set(yline,'Visible','off')
@@ -327,25 +403,65 @@ function zplots_button_Callback(~,~)
         set(xemitline,'Visible','off')
         set(yemitline,'Visible','off')
         set(zemitline,'Visible','off')
+        set(xenvelopeline1,'Visible','off');
+        set(xenvelopeline2,'Visible','off');
+        set(yenvelopeline1,'Visible','off');
+        set(yenvelopeline2,'Visible','off');
+        set(tspreadline,'Visible','off');
+        set(espreadline,'Visible','off');
+        set(xdispline,'Visible','off');
+        set(ydispline,'Visible','off');
+        set(transaxes,'YTickMode','auto')
         switch graphtype
             case 1 %X/Y Envelope Plot
+                set(xline,'LineStyle','-');
+                set(yline,'LineStyle','-');
                 set(xline,'Visible','on');
                 set(yline,'Visible','on');
-                set(yaxislabel,'String','RMS Width (mm)');
+                set(yaxislabel,'String','1 RMS Half Width [mm]');
             case 2 %X/Y Emittance Plot
                 set(xemitline,'Visible','on');
                 set(yemitline,'Visible','on');
                 set(yaxislabel,'String',...
-                    'X/Y Emittance (mm.mrad - 1 RMS Normalized)')
+                    'X/Y Emittance [mm.mrad - 1 RMS Normalized]')
             case 3 %Z Emittance Plot
                 set(zemitline,'Visible','on');
-                set(yaxislabel,'String','Z Emittance (keV.ns - 4 RMS)')
+                set(yaxislabel,'String','Z Emittance [keV.ns - 4 RMS]')
             case 4 %Beta Function Plot
                 set(xbetaline,'Visible','on');
                 set(ybetaline,'Visible','on');
-                set(yaxislabel,'String','X/Y Beta Function (mm/mrad)');
-            case 5 %None of the above
+                set(yaxislabel,'String','X/Y Beta Function [mm/mrad]');
+            case 5 % X Envelope Plot
+                set(xenvelopeline1,'Visible','on');
+                set(xenvelopeline2,'Visible','on');
+                set(xline,'Visible','on');
+                set(xline,'LineStyle',':');
+                set(yaxislabel,'String','X Envelope [mm]');
+            case 6 % Y Envelope Plot
+                set(yenvelopeline1,'Visible','on');
+                set(yenvelopeline2,'Visible','on');
+                set(yline,'Visible','on');
+                set(yline,'LineStyle',':');
+                set(yaxislabel,'String','Y Envelope [mm]');                
+            case 7 % Time Spread
+                set(tspreadline,'Visible','on');
+                set(yaxislabel,'String','Time Spread [ns]');
+            case 8 % Energy Spread
+                set(espreadline,'Visible','on');
+                set(yaxislabel,'String','Delta E / E [%]');
+            case 9 % X Dispersion
+                set(xline,'Visible','on');
+                set(xline,'LineStyle',':');
+                set(xdispline,'Visible','on');
+                set(yaxislabel,'String','x / (dp / p) [m]');
+            case 10
+                set(yline,'Visible','on');
+                set(yline,'LineStyle',':');
+                set(ydispline,'Visible','on');
+                set(yaxislabel,'String','y / (dp / p) [m]'); 
+            case 99 %None of the above
                 set(yaxislabel,'String','');
+                set(transaxes,'Ytick',[]);
         end
     end
     function toggle_energy(~,~)
@@ -358,7 +474,7 @@ function zplots_button_Callback(~,~)
             set(energyaxes,'Visible','on');
         end
     end
-    function toggle_xyplot(src,eventdata)
+    function toggle_xyplot(~,~) %#ok<DEFNU>
         %Toggles display of profile graph
         if (get(xy_checkbox,'Value')==0)
             set(xline,'Visible','off');
@@ -370,7 +486,7 @@ function zplots_button_Callback(~,~)
             set(transaxes,'Visible','on');
         end
     end
-    function toggle_boxlabel(src,eventdata)
+    function toggle_boxlabel(~,~)
         %Toggles dipslay of box positions
         if (get(boxlabel_checkbox,'Value')==0)
             set(boxlinehandles,'Visible','off');
@@ -380,7 +496,7 @@ function zplots_button_Callback(~,~)
             set(boxlabelhandles,'Visible','on');
         end
     end
-    function toggle_plotlabel(src,eventdata)
+    function toggle_plotlabel(~,~)
         %Toggles display of plot positions
         if (get(plotlabel_checkbox,'Value')==0)
             set(plotlabelhandles,'Visible','off');
@@ -390,15 +506,17 @@ function zplots_button_Callback(~,~)
             set(plotlinehandles,'Visible','on');
         end
     end
-    function toggle_particles(src,eventdata)
+    function toggle_particles(~,~)
         %Toggles dipslay of particle count
         if (get(particles_checkbox,'Value')==0)
             set(pline,'Visible','off');
+            set(pcounttext,'Visible','off');
         else
             set(pline,'Visible','on');
+            set(pcounttext,'Visible','on');
         end
     end
-    function toggle_beta(src,eventdata)
+    function toggle_beta(~,~) %#ok<DEFNU>
         %Toggles display of beta functions
         if(get(beta_checkbox,'Value')==0)
             set(xbetaline,'Visible','off');
@@ -408,7 +526,7 @@ function zplots_button_Callback(~,~)
             set(ybetaline,'Visible','on');
         end
     end
-    function change_max(src,eventdata)
+    function change_max(src,~)
         %changes max of z axis
         val=str2double(get(src,'String'));
         if (val<min(xlim(transaxes)))
@@ -426,7 +544,7 @@ function zplots_button_Callback(~,~)
             xlim(particleaxes,[min(xlim(particleaxes)) zmax]);
         end           
     end
-    function change_min(src,eventdata)
+    function change_min(src,~)
         %changes min of z axis
         val=str2double(get(src,'String'));
         if (val>max(xlim(transaxes)))
