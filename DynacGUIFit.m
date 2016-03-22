@@ -40,7 +40,9 @@ function varargout = DynacGUIFit(varargin)
 %       distribution, not from the number reported in 'dynac.long'
 %                - Improved handling of "NaN" results from the fitting
 %                function
-%       5/18/15 - Updated dispersion function to correct dp vs p confusion.
+%       5/18/15 - Updated dispersion function to correct dp vs p
+%       confusion.
+%       3/22/15 - Now does not choke on absolute file paths.
 %
 %       To Do:
 %           Grab executable choice from DynacGUI when called from there.
@@ -563,11 +565,13 @@ while ~feof(inputdeck)
     inputline=fgetl(inputdeck); %Read a new line from the input file.
     items=regexp(inputline,'\s+','split');
     if fileflag==1 %If we're in the midst of a card with a filename in it
-        inputline=['..' filesep inputline];
-        inputline=strrep(inputline,'\','\\');
-        cardbuffer=[cardbuffer inputline '\r\n']; %Add this line to the card buffer
-        bufferline=bufferline+1;
-        fileflag=0;
+        if exist(inputline) ~= 2 %file path is relative
+            inputline=['..' filesep inputline];
+        end
+            inputline=strrep(inputline,'\','\\'); %Make backslashes literal
+            cardbuffer=[cardbuffer inputline '\r\n']; %Add this line to the card buffer
+            bufferline=bufferline+1;
+            fileflag=0;
     elseif isempty(str2num(items{1})) %If this line starts with text...
         if ~isempty(prefix) %If there is a fitting line
             cardbuffer=[';FIT' prefix '\r\n' cardbuffer]; %Prepend it to the buffer
@@ -673,7 +677,9 @@ matchpars=get(handles.matchpars_popup,'UserData');
 selectedpar=matchpars{get(handles.matchpars_popup,'Value')};
 
 %General Fitting Options
-options=optimoptions('fmincon','DiffMinChange',.1,'Display','Iter');
+%options=optimoptions('fmincon','DiffMinChange',.1,'Display','Iter');
+%Use this for tuning the buncher
+options=optimoptions('fmincon','DiffMinChange',.0001,'Display','Iter');
 
 set(handles.solve_button,'ForegroundColor',[1 0 0],'String','Running');
 
