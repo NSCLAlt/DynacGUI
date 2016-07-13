@@ -43,6 +43,8 @@ function varargout = DynacGUIFit(varargin)
 %       5/18/15 - Updated dispersion function to correct dp vs p
 %       confusion.
 %       3/22/15 - Now does not choke on absolute file paths.
+%       4/20/16 - Now does not choke on RELATIVE file paths... I think
+%       6/1/16 - Added a logfile in the dynacscratch directory
 %
 %       To Do:
 %           Grab executable choice from DynacGUI when called from there.
@@ -88,6 +90,7 @@ function DynacGUIFit_OpeningFcn(hObject, ~, handles, varargin)
 
 % Choose default command line output for DynacGUIFit
 handles.output = hObject;
+logfilename = 'dynfitlog.txt'; 
 
 % --- List of Conditions to Match --- %
 
@@ -210,7 +213,7 @@ if inifile>=1
     end
 end
 
-set(hObject,'UserData',{handles.executable,mingw}); %Store exectuable location for later use
+set(hObject,'UserData',{handles.executable,mingw,logfilename}); %Store exectuable location for later use
 
 %Add Tools menu
 toolsmenu=uimenu(hObject,'Label','Tools');
@@ -673,13 +676,17 @@ function solve_button_Callback(hObject, ~, handles)
 
 %Starting Parameters
 sdir='dynacscratch';
+figtag = 'DynacGUIFit';
+guifig = findobj(allchild(0), 'flat','Tag', figtag);
+ud=get(guifig,'UserData');
+logfilename = ud{3};
 matchpars=get(handles.matchpars_popup,'UserData');
 selectedpar=matchpars{get(handles.matchpars_popup,'Value')};
 
 %General Fitting Options
-%options=optimoptions('fmincon','DiffMinChange',.1,'Display','Iter');
+options=optimoptions('fmincon','DiffMinChange',.1,'Display','Iter');
 %Use this for tuning the buncher
-options=optimoptions('fmincon','DiffMinChange',.0001,'Display','Iter');
+%options=optimoptions('fmincon','DiffMinChange',.0001,'Display','Iter');
 
 set(handles.solve_button,'ForegroundColor',[1 0 0],'String','Running');
 
@@ -690,8 +697,10 @@ fitdeckname=handles.fitdeckname;
 
 %Extract independent variable data from list box.
 selectedvars=get(handles.selectedvars_listbox,'String'); 
+selectheader=cell(length(selectedvars),1);
 for i=1:length(selectedvars)
     vararray(i,:)=regexp(selectedvars{i},'[-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?','match');
+    selectheader{i}=strcat('(',vararray(i,1),',',vararray(i,2),')');
 end
 fitstarts=str2double(vararray(:,3));
 fitlower=str2double(vararray(:,4));
@@ -699,6 +708,13 @@ fitupper=str2double(vararray(:,5));
 
 %Change to scratch directory and call fitting routine.
 cd(sdir);
+logfile = fopen(logfilename, 'w');
+fprintf(logfile, '%10s\t', selectedpar);
+for i=1:length(selectedvars)
+    fprintf(logfile, '%10s\t', char(selectheader{i}));
+end
+fprintf(logfile, '\r\n');
+fclose(logfile);
 fitmode=get(get(handles.fit_buttongroup,'SelectedObject'),'String');
 if strcmp(fitmode,'Minimize')
     %x, fval, exitflag
@@ -740,7 +756,7 @@ if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgr
 end
 
 function dynfunc=dynfunc(values,output,deckfile)
-%Returns an arbitrary value for a given deck. The parameters identified 
+%Returns a list of result values for a given deck. The parameters identified 
 %by ;FIT # statements in the deck will be replaced by the elements of 
 %the "values" input, which should be a vector.
 %
@@ -787,6 +803,7 @@ guifig = findobj(allchild(0), 'flat','Tag', figtag);
 ud=get(guifig,'UserData');
 executable=ud{1};
 mingw=ud{2};
+logfilename = ud{3};
 
 %Returns selected output value for a given input deck and value of fit parameter
     datafile1='dynac.short';
@@ -797,13 +814,19 @@ mingw=ud{2};
     if result~=0 
         return 
     end
+    
     %Run dynac on the modified deck
     command=['"' executable '"' mingw ' ' outfile];
     [~,~]=system(command);
+    
     %Scan dynac.short for the results
     out=getlastemit(datafile1,datafile2);
     if ~isempty(out)
         dynfunc=out.(output);
+        logfile = fopen(logfilename, 'a');
+        fprintf(logfile,'%10.5g\t',dynfunc,values);
+        fprintf(logfile,'\r\n');
+        fclose(logfile);
     else
         dynfunc=NaN;
     end
@@ -816,11 +839,17 @@ newdeck=[];
 
 line=fgetl(deck); %Get first line
 i=0;
+fileflag=0;
 
 while ischar(line)
     line=strrep(line,'\','\\');
-    newdeck=[newdeck line '\r\n']; %Add line to new file
-    if strncmp(line,';FIT',4)
+    if fileflag==0
+        newdeck=[newdeck line '\r\n']; %Add line to new file
+    else
+        newdeck=[newdeck '..\\' line '\r\n'];
+        fileflag=0;
+    end
+    if strncmp(line,';FIT',4)    %If this line is a FIT comment
         C=strsplit(line);        %Split fit comment line
         nfits=(length(C)-1)/2;   %number of line/value pairs
         rows=C(2:2:length(C));   %array of row values
@@ -831,7 +860,7 @@ while ischar(line)
             return;
         end
         newcard='';                  %Initialize the new card
-        for k=1:nfits
+        for k=1:nfits         %For each fitting parameter
          i=i+1;               %count number of FIT statements till this point
          if (length(values))<i    %Check for more FIT statements than inputs
             disp('Error: Not enough input values');
@@ -839,11 +868,19 @@ while ischar(line)
             return;
          end
          fitline=str2double(C(k*2)); %Determine which line contains fitting par
-         fitpar=str2double(C(k*2+1)); %Determine which is fitting parameter
+         fitpar=str2double(C(k*2+1)); %Determine entry which is fitting parameter
          if k==1 %First parameter per card
            for j=1:fitline
             line=fgetl(deck);        %Skip to line with parameter
-            newcard{j}=[line ' \r\n'];
+            if regexp(line,'^RFQPTQ|^FIELD|^FSOLE|^RDBEAM') %next line is a filename
+                fileflag=1;
+            end
+            if fileflag==0;
+                newcard{j}=[line ' \r\n']; %Add skipped lines unaltered
+            else
+                newcard{j}=['..\' line ' \r\n']; %make this general
+                fileflag=0;
+            end
            end
            line=fgetl(deck);        %Get line with parameter to be changed
            D=strsplit(line);
@@ -861,6 +898,10 @@ while ischar(line)
          end
         end
         newdeck=[newdeck horzcat(newcard{:})];   %add the new card to the deck 
+    else
+        if regexp(line,'^RFQPTQ|^FIELD|^FSOLE|^RDBEAM') %next line is a filename
+                fileflag=1;
+        end
     end
     
     line=fgetl(deck); %get next line

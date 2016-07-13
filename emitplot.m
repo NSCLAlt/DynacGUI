@@ -1456,57 +1456,118 @@ function px_fig=px_plot(~,~,x,energy,plottitle,varargin)
        function phist_fig=p_hist(~,~,phase,plottitle)
            %Plot Phase Histogram
             phist_fig=figure('Name','Time Histogram');
-            phist_ax=axes('Position',[0.13 0.2 0.775 0.715]);
-            xlabel('dt (ns)');            
-            binwidth = 1; %Default Histogram bin width in ns
-            acceptwidth = 12; %Default Acceptance width in ns
-            set(phist_fig,'UserData',plottitle);
+            ud.phist_ax=axes('Position',[0.13 0.2 0.775 0.715]);
+            xlabel('dt (ns)'); 
+            ud.phase=phase;
+            ud.binwidth = 1; %Default Histogram bin width in ns
+            ud.acceptwidth = 12; %Default Acceptance width in ns
+            ud.plottitle=plottitle;
             
             %Add Controls to adjust Historgram
             backgroundcolor=get(phist_fig,'Color');
             uicontrol('Style','Text','String','Bin Width (ns)',...
                 'BackgroundColor',backgroundcolor,...
-                'Position',[30 20 100 20]);
-            uicontrol('Style','Edit','String',binwidth,...
-                'Position',[130 20 50 20],...
-                'Callback',{@change_binwidth,phist_ax,phase,acceptwidth});
+                'Position',[30 40 100 20]);
+            uicontrol('Style','Edit','String',ud.binwidth,...
+                'Position',[130 40 50 20],...
+                'Callback',{@change_binwidth});
             uicontrol('Style','Text','String','Accept Width (ns)',...
                 'BackgroundColor',backgroundcolor,...
-                'Position',[200 20 100 20]);
-            uicontrol('Style','Edit','String',acceptwidth,...
-                'Position',[320 20 50 20],...
-                'Callback',{@change_acceptwidth,phist_ax,phase,binwidth});
+                'Position',[200 40 100 20]);
+            uicontrol('Style','Edit','String',ud.acceptwidth,...
+                'Position',[320 40 50 20],...
+                'Callback',{@change_acceptwidth});
+            uicontrol('Style','Text','String','Lower Limit (ns):',...
+                'BackgroundColor',backgroundcolor,...
+                'Position',[30 5 100 20]);
+            ud.ll=uicontrol('Style','Edit','String',-10^12,...
+                'Position',[130 5 50 20],...
+                'Callback',{@change_lowerlimit});
+            uicontrol('Style','Text','String','Upper Limit (ns):',...
+                'BackgroundColor',backgroundcolor,...
+                'Position',[200 5 100 20]);
+            ud.ul=uicontrol('Style','Edit','String',10^12,...
+                'Position',[320 5 50 20],...
+                'Callback',{@change_upperlimit});
+            set(phist_fig,'UserData',ud);
             
             %Calculate histogram
-            calchist(phist_ax,phase,binwidth,acceptwidth);  
+            calchist;  
+            xlimits=get(gca,'Xlim');
+            ylimits=get(gca,'Ylim');
+            ud.lline=line([xlimits(1) xlimits(1)],ylimits,'Color','r');
+            ud.uline=line([xlimits(2) xlimits(2)],ylimits,'Color','r');
+            set(ud.ll,'String',xlimits(1));
+            set(ud.ul,'String',xlimits(2));
+            set(phist_fig,'UserData',ud);     
+            sumtext;
             
-            
-       function calchist(phist_ax,phase,binwidth,aw)
+       function calchist
+           %Retrieve Data
+           ud=get(gcf,'UserData');
+           
            %Plot Histogram
-           trange=min(phase):binwidth:max(phase);
-           counts=histc(phase,trange);
-           bar(phist_ax,trange,counts/max(counts),'histc');
-           line([-aw/2 -aw/2],get(gca,'ylim'));
-           line([aw/2 aw/2],get(gca,'ylim'));
-           title([get(gcf,'UserData') ' Histogram']);
+           trange=min(ud.phase):ud.binwidth:max(ud.phase);
+           counts=histc(ud.phase,trange);
+           bar(ud.phist_ax,trange,counts/max(counts),'histc');
+           line([-ud.acceptwidth/2 -ud.acceptwidth/2],get(gca,'ylim'));
+           line([ud.acceptwidth/2 ud.acceptwidth/2],get(gca,'ylim'));
+           title([ud.plottitle ' Histogram']);
+           xlabel('nanoseconds');
+           ylabel('Normalized Counts');
+           
+       function sumtext
+           ud=get(gcf,'UserData');
            
            %Generate Summary Text
-           nparts=histc(phase,[-10^12,-aw/2,aw/2,10^12]);
-           ntotal=nparts(1)+nparts(2)+nparts(3);
+           xlim=get(gca,'Xlim');
+           ylim=get(gca,'Ylim');
+           lowerlimit=str2double(get(ud.ll,'String'));
+           upperlimit=str2double(get(ud.ul,'String'));
+           ud.lline=line([lowerlimit lowerlimit],[0 1],'Color','r');
+           ud.uline=line([upperlimit upperlimit],[0 1],'Color','r');
+           nparts=histc(ud.phase,[lowerlimit,-ud.acceptwidth/2,...
+               ud.acceptwidth/2,upperlimit]); %make histogram with 3 bins
+           ntotal=nparts(1)+nparts(2)+nparts(3); %total of all particles
            summarytext=sprintf('%g in bunch (%g%%)\n%g outside (%g%%)',nparts(2),...
                (nparts(2)/ntotal)*100,nparts(1)+nparts(3),...
                (nparts(1)+nparts(3))*100/ntotal);
-           ylim=get(gca,'ylim');
-           xlim=get(gca,'xlim');
            text(xlim(2),ylim(2),summarytext,'HorizontalAlignment','right',...
                'VerticalAlignment','top','FontSize',8);
+           set(gcf,'UserData',ud);
+
            
-       function change_binwidth(src,~,phist_ax,phase,acceptwidth)
+       function change_binwidth(src,~)
            %Recalculate histogram for new bin width
-           binwidth=str2double(get(src,'String'));
-           calchist(phist_ax,phase,binwidth,acceptwidth);
+           ud=get(gcf,'UserData');
+           ud.binwidth=str2double(get(src,'String'));
+           set(gcf,'UserData',ud);
+           calchist;
+           sumtext;
            
-       function change_acceptwidth(src,~,phist_ax,phase,binwidth)
+       function change_acceptwidth(src,~)
            %Recalculate acceptance width
-           acceptwidth=str2double(get(src,'String'));
-           calchist(phist_ax,phase,binwidth,acceptwidth);
+           ud=get(gcf,'UserData');
+           ud.acceptwidth=str2double(get(src,'String'));
+           set(gcf,'UserData',ud);
+           calchist;
+           sumtext;
+           
+       function change_lowerlimit(src,~)
+           %Move lower limit for calculation
+           lowerlimit=str2double(get(src,'String'));
+           ud=get(gcf,'UserData');
+           set(ud.lline,'Xdata',[lowerlimit lowerlimit]);
+           calchist;
+           sumtext;
+           
+       function change_upperlimit(src,~)
+           %Move lower limit for calculation
+           upperlimit=str2double(get(src,'String'));
+           ud=get(gcf,'UserData');
+           set(ud.uline,'Xdata',[upperlimit upperlimit]);
+           calchist;
+           sumtext;
+
+           
+           

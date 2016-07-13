@@ -151,6 +151,17 @@ function varargout = DynacGUI(varargin)
 %            - Added "Settings" window to allow changing integration steps
 %            without restarting. (12/23/15)
 %
+%Version 4.4 - Particle count text now toggles with graph. (2/10/16)
+%            - Added support for mouse wheel to tune setting box.  Could
+%            use some tweaking of the limints. (2/22/16)
+%            - Fixed "Save / View Results" for the t > RFQ case (2/26/16)
+%            - Updated gendeck to allow for beam specification using half
+%               widths rather than CS parameters.
+%            - Edit tune settings button now brings window to front if it
+%               is already open.
+%            - Added error checking on launch to test for presence or
+%            absence of input files.
+%
 %       Wishlist:
 %         - Ability to run COSY decks
 %         - Programmatically deterimine box location lines (DONE)
@@ -160,11 +171,9 @@ function varargout = DynacGUI(varargin)
 %         - Better error handling of duplicate plot names.
 %         - Display arbitrary .dst file - In progress
 %              - Implement sub menus.
-%              - Overlay still needs text and histograms to work in all
-%              axis configurations.
 %              - Move this out of main function
 %              - Multi charge state files
-%         - Dialogue box to adjust .ini settings from within program
+%         - Option to show "reject" sizes
 %
 
 % Last Modified by GUIDE v2.5 29-Jul-2014 11:48:56
@@ -200,7 +209,7 @@ function DynacGUI_OpeningFcn(hObject, eventdata, handles, varargin)
 handles.output = hObject;
 
 %VERSION NUMBER
-handles.dgversion='4.3';
+handles.dgversion='4.4';
 
 %Check for open window and refuse to fire again if there is one.
 figtag = 'DynacGUI';
@@ -267,12 +276,24 @@ if inifile>=1
     end
     if isfield(handles.inivals,'Devices')
         set(handles.devicefile_inputbox,'String',handles.inivals.Devices);
+        if exist(handles.inivals.Devices,'file') ~= 2
+            inivars = [{['Warning: Device file "' handles.inivals.Devices...
+                '" not present']} {' '} inivars];
+        end
     end
     if isfield(handles.inivals,'Layout')
         set(handles.layoutfile_inputbox,'String',handles.inivals.Layout);
+        if exist(handles.inivals.Layout,'file') ~= 2
+            inivars = [{['Warning: Layout file "' handles.inivals.Layout...
+                '" not present']} {' '} inivars];
+        end
     end
     if isfield(handles.inivals,'Executable')
         handles.executable=handles.inivals.Executable;
+        if exist(handles.inivals.Executable,'file') ~= 2
+            inivars = [{['Warning: Executable file ' handles.inivals.Executable...
+                ' may not be present']} {' '} inivars];
+        end
         if isfield(handles.inivals,'Executable2') %If there is a second executable...
             %check for a version specifier, set a value if missing
             if ~isfield(handles.inivals,'DynacVersion2')
@@ -869,7 +890,7 @@ settingsfile=get(handles.settingsfile_inputbox,'String');
     try
         sf=fopen(settingsfile);
         if sf== -1
-            disperror('Error: Settings File Not Found');
+            disperror(['Error: Settings File ' settingsfile ' Not Found']);
             return;
         end
     catch
@@ -1070,6 +1091,7 @@ function showsettings_button_Callback(hObject, ~, handles) %#ok<DEFNU>
 %another one
 setwin=findobj(allchild(0),'Tag','DGSettings');
         if ishandle(setwin)
+            figure(setwin);
             return
         end 
 
@@ -1088,7 +1110,7 @@ scrsz = get(0,'ScreenSize');
 %Generate actual figure, sized relative to screen size.
 settingsfigure=figure('Name','Tune Settings','NumberTitle','Off',...
     'Position',[.1*scrsz(3) .02*scrsz(4) scrsz(3)/2 scrsz(4)*.9],...
-    'Resize','off','Tag','DGSettings');
+    'Resize','off','Tag','DGSettings','WindowScrollWheelFcn',@wheel_fcn);
 %Generate the backgound panel with the title of the tune.
 panel1 = uipanel('Parent',settingsfigure,'Title',...
     get(handles.settingsfile_inputbox,'String'),...
@@ -1145,6 +1167,18 @@ function slider_callback1(src,~,panel1,panel2)
     p2pos=get(panel2,'Position');
     set(panel2,'Position',[0 val*(p1pos(4)-p2pos(4))-toppad p1pos(3) p2pos(4)]);
 end 
+
+function wheel_fcn(~,callbackdata)
+    wheelscale = 20;
+    sliderscale = 1/nfields;
+    clicks = callbackdata.VerticalScrollCount;
+    p1pos=get(panel1,'Position');
+    p2pos=get(panel2,'Position');
+    set(panel2,'Position',[0 p2pos(2)+clicks*wheelscale p1pos(3) p2pos(4)]);
+    slidervalue = get(s,'Value');
+    newslidervalue = max(min(slidervalue-clicks*sliderscale,1),0);
+    set(s,'Value',newslidervalue)
+end
 
 function setting_callback(hObject,~,i,fields)
     %change setting value when textbox is edited
@@ -1492,7 +1526,16 @@ function zplots_button_Callback(~, ~, handles) %#ok<DEFNU>
         disperror('Error: Most likely missing dynac.print');
         return;
     end
-    %Plot X envelope
+
+    zpos = zdata.data(:,1);
+    xrms = zdata.data(:,2);
+    yrms = zdata.data(:,3);
+    xemit = zdata.data(:,6);
+    yemit = zdata.data(:,7);
+    zemit = zdata.data(:,8);
+    energy = zdata.data(:,9);
+    
+    %Plot X RMS width
     scrsz = get(0,'ScreenSize');
     plot_window=figure('Name','Z-Axis Plots','NumberTitle','Off',...
         'MenuBar','figure',...
@@ -1500,107 +1543,106 @@ function zplots_button_Callback(~, ~, handles) %#ok<DEFNU>
     transaxes=axes('ActivePositionProperty','outerposition','Color','None');
     backgroundcolor=get(plot_window,'color');
     set(transaxes,'Position',[.05 .2 .9 .75]);
-    xline=plot(transaxes,zdata.data(:,1),zdata.data(:,2),'Color','r');
+    xline=plot(transaxes,zpos,xrms,'Color','r');
     ylabel(transaxes,'1 RMS Half Width (mm)');
     set(transaxes,'color','none');
     box(transaxes,'off');
     
-    %Plot Y envelope
+    %Plot Y RMS width
     hold on;
-    yline=plot(transaxes,zdata.data(:,1),-zdata.data(:,3),'Color','g');
+    yline=plot(transaxes,zpos,-yrms,'Color','g');
     
     %Plot dashed line at x/y = 0
-    plot(transaxes,[0,max(zdata.data(:,1))],[0,0],':k','LineWidth',.1);
+    plot(transaxes,[0,max(zpos)],[0,0],':k','LineWidth',.1);
     
     %Plot X beta function
     hold on;
-    gamma=zdata.data(1,9)/handles.settings.A/931.494+1;
-    relbeta=sqrt(1-1/gamma^2);
-    xbeta=relbeta*zdata.data(:,2).*zdata.data(:,2)./zdata.data(:,6);
-    xbetaline=plot(transaxes,zdata.data(:,1),xbeta,'Color','r');
+    gamma=energy/handles.settings.A/931.494+1;
+    relbeta=sqrt(1-1./gamma.^2);
+    xbeta=relbeta.*xrms.*xrms./xemit;
+    xbetaline=plot(transaxes,zpos,xbeta,'Color','r');
     set(xbetaline,'Visible','off');
     
     %Plot Y beta function
     hold on;
-    ybeta=relbeta*zdata.data(:,3).*zdata.data(:,3)./zdata.data(:,7);
-    ybetaline=plot(transaxes,zdata.data(:,1),-ybeta,'Color','g');
+    ybeta=relbeta.*yrms.*yrms./yemit;
+    ybetaline=plot(transaxes,zpos,-ybeta,'Color','g');
     set(ybetaline,'Visible','off');
     
     %Plot X emittance
     hold on;
-    xemitline=plot(transaxes,zdata.data(:,1),zdata.data(:,6),'Color','r');
+    xemitline=plot(transaxes,zpos,xemit,'Color','r');
     set(xemitline,'Visible','off');
     
     %Plot Y emittance
     hold on;
-    yemitline=plot(transaxes,zdata.data(:,1),-zdata.data(:,7),'Color','g');
+    yemitline=plot(transaxes,zpos,-yemit,'Color','g');
     set(yemitline,'Visible','off');
     
     %Plot Z emittance
     hold on;
-    zemitline=plot(transaxes,zdata.data(:,1),zdata.data(:,8),'Color','k');
+    zemitline=plot(transaxes,zpos,zemit,'Color','k');
     set(zemitline,'Visible','off');
 
-    if (size(zdata.data,2)>=10) %Fails for very old versions of dynac
+    if (size(zdata.data,2)>10) %Fails for very old versions of dynac
     %Plot X Envelope
     hold on;
-    xenvelopeline1=plot(transaxes,zdata.data(:,1),zdata.data(:,11),'Color','r');
-    xenvelopeline2=plot(transaxes,zdata.data(:,1),zdata.data(:,12),'Color','r');
+    xenvelopeline1=plot(transaxes,zpos,zdata.data(:,11),'Color','r');
+    xenvelopeline2=plot(transaxes,zpos,zdata.data(:,12),'Color','r');
     set(xenvelopeline1,'Visible','off');
     set(xenvelopeline2,'Visible','off');
     
     %Plot Y Envelope
     hold on;
-    yenvelopeline1=plot(transaxes,zdata.data(:,1),zdata.data(:,13),'Color','g');
-    yenvelopeline2=plot(transaxes,zdata.data(:,1),zdata.data(:,14),'Color','g');
+    yenvelopeline1=plot(transaxes,zpos,zdata.data(:,13),'Color','g');
+    yenvelopeline2=plot(transaxes,zpos,zdata.data(:,14),'Color','g');
     set(yenvelopeline1,'Visible','off');
     set(yenvelopeline2,'Visible','off');
     
     %Plot Time Spread
     hold on;
     tspread=1e9*(zdata.data(:,16)-zdata.data(:,15));
-    tspreadline=plot(transaxes,zdata.data(:,1),tspread,'Color','k');
+    tspreadline=plot(transaxes,zpos,tspread,'Color','k');
     set(tspreadline,'Visible','off');
     
     %Plot Energy Spread
     hold on;
     maxdeltae=max(abs(zdata.data(:,19)),abs(zdata.data(:,20)));
-    espread=100*(maxdeltae./zdata.data(:,9)); %Energy spread as a percentage
-    espreadline=plot(transaxes,zdata.data(:,1),espread,'Color','k');
+    espread=100*(maxdeltae./energy); %Energy spread as a percentage
+    espreadline=plot(transaxes,zpos,espread,'Color','k');
     set(espreadline,'Visible','off');
         
     else %Trap old versions of Dynac with less data in "dynac.print"
         nlines=4;
-        nullline=zeros(length(zdata.data(:,1)));
-        xenvelopeline1=plot(transaxes,zdata.data(:,1),nullline,'Color','k');
-        xenvelopeline2=plot(transaxes,zdata.data(:,1),nullline,'Color','k');
-        yenvelopeline1=plot(transaxes,zdata.data(:,1),nullline,'Color','k');
-        yenvelopeline2=plot(transaxes,zdata.data(:,1),nullline,'Color','k');
-        tspreadline=plot(transaxes,zdata.data(:,1),nullline,'Color','k');
-        espreadline=plot(transaxes,zdata.data(:,1),nullline,'Color','k');
+        nullline=zeros(length(zpos));
+        xenvelopeline1=plot(transaxes,zpos,nullline,'Color','k');
+        xenvelopeline2=plot(transaxes,zpos,nullline,'Color','k');
+        yenvelopeline1=plot(transaxes,zpos,nullline,'Color','k');
+        yenvelopeline2=plot(transaxes,zpos,nullline,'Color','k');
+        tspreadline=plot(transaxes,zpos,nullline,'Color','k');
+        espreadline=plot(transaxes,zpos,nullline,'Color','k');
     end
         
     %Plot Dispersion
-    if (size(zdata.data,2)>=21) %Only works with beta version that includes D
+    if (size(zdata.data,2)>=21) %Only works with versions that includes dispersion
         hold on;
-        xdispline=plot(transaxes,zdata.data(:,1),zdata.data(:,21),'Color','r');
-        ydispline=plot(transaxes,zdata.data(:,1),zdata.data(:,22),'Color','g');
+        xdispline=plot(transaxes,zpos,zdata.data(:,21),'Color','r');
+        ydispline=plot(transaxes,zpos,zdata.data(:,22),'Color','g');
         set(xdispline,'Visible','off');      
         set(ydispline,'Visible','off');
         nlines=10;
     else %Fail gracefully
         nlines=8;
-        nullline=zeros(length(zdata.data(:,1)));
-        xdispline=plot(transaxes,zdata.data(:,1),nullline,'Color','r');
-        ydispline=plot(transaxes,zdata.data(:,1),nullline,'Color','g');
+        nullline=zeros(length(zpos));
+        xdispline=plot(transaxes,zpos,nullline,'Color','r');
+        ydispline=plot(transaxes,zpos,nullline,'Color','g');
     end
     
     %Plot energy on 2nd axis
     energyaxes=axes('Position',get(transaxes,'Position'),...
         'XaxisLocation','bottom','YAxisLocation','right',...
         'Color','none');
-    eline=line(zdata.data(:,1),zdata.data(:,9),'Color','magenta',...
-        'Parent',energyaxes);
+    eline=line(zpos,energy,'Color','magenta','Parent',energyaxes);
     ylabel(energyaxes,'Energy [MeV]');
     
     %Set up axes for box labels.  This is the bottom axes, and contains
@@ -1696,7 +1738,7 @@ function zplots_button_Callback(~, ~, handles) %#ok<DEFNU>
             if ~isempty(ud.plotzpos{i})
                 h=line([ud.plotzpos{i} ud.plotzpos{i}],ylim,'Color','k');
                 plotlinehandles=[plotlinehandles h];
-                h=text(ud.plotzpos{i},max(ylim),ud.names{i},...
+                h=text(ud.plotzpos{i},max(ylim),strrep(ud.names{i},'_',''),...
                     'Rotation',90,'VerticalAlignment',...
                     'Bottom','HorizontalAlignment','Right');
                 plotlabelhandles=[plotlabelhandles h];
@@ -1714,18 +1756,19 @@ function zplots_button_Callback(~, ~, handles) %#ok<DEFNU>
     
     %setup axes for particle number counts
     if (size(zdata.data,2)>=10) %Fails on very old versions of Dynac
+        premain = zdata.data(:,10);
         particleaxes=axes('Position',get(transaxes,'Position'),...
         'XaxisLocation','bottom','YAxisLocation','right',...
         'Visible','off','Xlim',[zmin zmax],'Ylim',[0 1],...
         'Color','none','Ytick',[]);
-         pline=line(zdata.data(:,1),zdata.data(:,10)/max(zdata.data(:,10)),...
+         pline=line(zpos,premain/max(premain),...
             'Color','blue','Parent',particleaxes);
         %Displays particle count
         % This line is the particle count at the end of the line
         % and should be properly general.
         pcount=sprintf('Particles left at end: %g / %g\r\n',...
-            zdata.data(length(zdata.data(:,1)),10),zdata.data(1,10));
-        text(0,0,pcount);
+            premain(length(zpos)),premain(1));
+        pcounttext=text(0,0,pcount);
         particles_checkbox=uicontrol(plot_window,...
             'Style','checkbox','String','Particle Count',...
             'Position',[375 20 150 30],'BackgroundColor',backgroundcolor,...
@@ -1922,8 +1965,10 @@ function zplots_button_Callback(~, ~, handles) %#ok<DEFNU>
         %Toggles dipslay of particle count
         if (get(particles_checkbox,'Value')==0)
             set(pline,'Visible','off');
+            set(pcounttext,'Visible','off');
         else
             set(pline,'Visible','on');
+            set(pcounttext,'Visible','on');
         end
     end
     function toggle_beta(~,~) %#ok<DEFNU>
@@ -2059,15 +2104,22 @@ if ~isdir('dynacscratch')
         return;
     end
 end
-if ispc
-    sdir=('dynacscratch\');
-else
-    sdir=('dynacscratch/');
-end
+
+sdir=['dynacscratch' filesep];
+
 
 %Build output deck up to RFQ, if present
 outputfilename = get(handles.outputdeck_inputbox,'String');
 fileroot = strrep(outputfilename,'.in','');
+
+%Clear out scratch directory
+cd(sdir);
+oldfiles =  dir([fileroot '*.*']);
+if ~isempty(oldfiles)
+    delete(oldfiles.name);
+end
+cd('..');
+
 outputfilename1= [sdir fileroot '_1.in'];
 %tunefilename=get(handles.settingsfile_inputbox,'String');
 if isempty(get(handles.a_textbox,'String'))
@@ -2097,30 +2149,27 @@ end
 %Run part 1 & dump dist
     cd(sdir);
     
-    if (get(handles.mingw_checkbox,'Value')==1)
-        command=['dynacv6_0 -mingw ' [fileroot '_1.in']];
+    if (get(handles.mingw_checkbox,'Value')==1) %Build executable command
+        command=['"' handles.executable '" -mingw ' [fileroot '_1.in']];
     else
-        command=['dynacv6_0 ' [fileroot '_1.in']];
+        command=['"' handles.executable '" ' [fileroot '_1.in']];
     end
-    [~,dynacoutput]=system(command);
-    set(handles.dynac_output_textbox,'String',dynacoutput);
-    movefile('dynac.print','dynac.print_1'); %save first dynac.print
-    movefile('emit.plot','emit.plot_1');
+    
+    [~,dynacoutput]=system(command); %run Dynac
+    set(handles.dynac_output_textbox,'String',dynacoutput); %display output
+    movefile('dynac.print','dynac.print_1'); %store first dynac.print
+    movefile('emit.plot','emit.plot_1'); %store first emit.plot
     cd ('..');
     
 %Generate rfq decks and distribution files 
 
 %Get starting parameters
-dstfile=[sdir fileroot '_1.dst'];
-rfqfreq=str2double(handles.settings.rfqfreq);
-rfqenergy=str2double(handles.settings.rfqenergy);
+dstfile=[sdir fileroot '_1.dst']; %retrieve output file from pre RFQ
+rfqfreq=str2double(handles.settings.rfqfreq); 
+rfqenergy=str2double(handles.settings.rfqenergy); 
 rfqcells=handles.settings.rfqcells;
 rfqfilename=handles.settings.rfqfile;
-if ispc
-    rfqfilename=['..\' rfqfilename];
-else
-    rfqfilename=['../' rfqfilename];
-end
+rfqfilename=['..' filesep rfqfilename];
 
 %Split the input file into RFQ periods. Nfiles = number of files
 [nfiles,~,refcharge]=splitdst(dstfile,rfqfreq); 
@@ -2156,7 +2205,7 @@ for i=1:nfiles
     fprintf(deckfile,'%s\r\n',rfqcells);
     rfqamp=(.2/qovera)*100;
     fprintf(deckfile,'%g %g %g %s\r\n',rfqamp-100,rfqamp-100,0,'180');
-    %Post RFQ Silliness
+    %Post RFQ Silliness - add better rejection here at some point!
     fprintf(deckfile,'REFCOG\r\n');
     fprintf(deckfile,'0\r\n');
     %Write output distribution
@@ -2168,16 +2217,16 @@ for i=1:nfiles
     fclose(deckfile);
     
     %Run each Dynac deck
-    if (get(handles.mingw_checkbox,'Value')==1)
-        command=['dynacv6_0 -mingw ' deckfilename];
+    if (get(handles.mingw_checkbox,'Value')==1) %Build executable command
+        command=['"' handles.executable '" -mingw ' deckfilename];
     else
-        command=['dynacv6_0 ' deckfilename];
+        command=['"' handles.executable '" ' deckfilename];
     end
     [~,dynacoutput]=system(command);
     set(handles.dynac_output_textbox,'String',dynacoutput);
     
     try
-        pcount=dlmread('dynac.print','',1,9);
+        pcount=dlmread(distfilename,'',[0 0 0 0]);
     catch
         pcount=0;
     end
@@ -2213,11 +2262,16 @@ set(handles.generatedgraphs_listbox,'UserData',ud);
 
 %Run part 3
 cd(sdir);    
-    if (get(handles.mingw_checkbox,'Value')==1)
-        command=['dynacv6_0 -mingw ' [fileroot '_3.in']];
+    if (get(handles.mingw_checkbox,'Value')==1) %Build executable command
+        command=['"' handles.executable '" -mingw ' [fileroot '_3.in']];
     else
-        command=['dynacv6_0 ' [fileroot '_3.in']];
+        command=['"' handles.executable '" ' [fileroot '_3.in']];
     end
+%     if (get(handles.mingw_checkbox,'Value')==1)
+%         command=['dynacv6_0 -mingw ' [fileroot '_3.in']];
+%     else
+%         command=['dynacv6_0 ' [fileroot '_3.in']];
+%     end
     [~,dynacoutput]=system(command);
     set(handles.dynac_output_textbox,'String',dynacoutput);
     movefile('dynac.print','dynac.print_3');
@@ -2238,11 +2292,17 @@ print2(:,1)=print2(:,1)+z1;
 print3(:,1)=print3(:,1)+z1+z2;
 print1=[print1;print2;print3];
 printfile=fopen('dynac.print','w');%remove the dir soon
-fprintf(printfile,'%s%s%s%s\r\n','       l(m)         x(mm)    ',...
+%This will break on older versions of Dynac.  Don't make fault tolerant
+%unless someone complains - not worth the effort.
+fprintf(printfile,'%s%s%s%s%s%s%s%s\r\n','       l(m)         x(mm)    ',...
     '     y(mm)          z(deg)        z(mm)  ',...
     '    emx(mm.mrd)  emy(mm.mrd)   ',...
-    'emz(KeV.ns)   energy(MeV)    #particles');
-fmtstr=[repmat('  %12.5E',1,10) '\r\n'];
+    'emz(KeV.ns)   energy(MeV)   #particles ',...
+    '  xmin(mm)     xmax(mm)     ymin(mm)     ymax(mm)',...
+    '     tmin(s)      tmax(s)     phmin(deg)',...
+    '    phmax(deg)   Wmin(MeV)    Wmax(MeV)',...
+    '    Dx(m)        Dy(m)');
+fmtstr=[repmat('  %12.5E',1,22) '\r\n'];
 fprintf(printfile,fmtstr,print1');
 fclose(printfile);
 
@@ -2253,8 +2313,8 @@ else
     system('cat dynacscratch/emit.plot_1 dynacscratch/emit.plot_3 >emit.plot');
 end
 ud=get(handles.generatedgraphs_listbox,'UserData');
-[plotlist,ud.plotloc,ud.names,ud.plotzpos]=scanemitplot(ud.freqlist,handles);
-set(handles.generatedgraphs_listbox,'String',plotlist);
+[ud.plotlist,ud.plotloc,ud.names,ud.plotzpos]=scanemitplot(ud.freqlist,handles);
+set(handles.generatedgraphs_listbox,'String',ud.plotlist);
 set(handles.generatedgraphs_listbox,'UserData',ud);
 
 clear rfqptotal;

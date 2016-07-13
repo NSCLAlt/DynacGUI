@@ -87,6 +87,10 @@ function [settings,freqlist]=gendeck(outputfilename,settings,layoutfilename,devi
 %        the bunch.
 %11/13/15 - "Compiled Successfully" message forces output color to black.
 %12/23/15 - Made integration steps across a cavity a settable parameter
+%3/11/16 - Added support for using distribution widths, rather than CS
+%parameters
+%3/23/16 - Added optional parameters to SLIT to allow for offsetting the
+%center.
 
 %To Do
 %       Put some error checking in Zones in case of incorrect numbers of
@@ -227,8 +231,13 @@ else
         settings.ZLaw=5;
         unitstruct.ZLaw=[];
     end
-    if settings.ZLaw==5 && ~isfield(settings,'Deltae')
-        disperror('Error: Law 5 selected with no energy spread specified');
+    itwiss = 1; %default value
+    ZLaw = settings.ZLaw;
+    
+    %Check for missing parameters
+    if (settings.ZLaw==5 || settings.ZLaw==6) && ~isfield(settings,'Deltae')
+        disperror(['Error: ZLaw ' num2str(setting.ZLaw)...
+            ' selected with no energy spread specified']);
         return;
     end
     if settings.ZLaw<=4
@@ -238,26 +247,48 @@ else
             return;
         end
     end
+    if settings.ZLaw==6 && ~isfield(settings,'Betaz')
+        disperror('Error: ZLaw 6 selected with no BetaZ specified.')
+        return;
+    end
+    if settings.ZLaw >= 11
+        if ~isfield(settings,'Xmax') || ~isfield(settings,'XPmax') ||...
+                ~isfield(settings,'Ymax') || ~isfield(settings,'YPmax') ||...
+                ~isfield(settings,'Tmax')
+            disperror('Error: Insufficient beam size parameters specified');
+            return;
+        end
+        itwiss=0;
+        ZLaw = ZLaw - 10;
+    end
     fprintf(outfile,';%s\r\n',outputfilename); %Beamline Name
     fprintf(outfile,'%s\r\n','GEBEAM');
-    fprintf(outfile,'%g %s\r\n',settings.ZLaw,'1'); %Distribution Type
+    fprintf(outfile,'%g %g\r\n',ZLaw,itwiss); %Distribution Type
     fprintf(outfile,'%g\r\n',settings.RF); %RF frequency
     fprintf(outfile,'%g\r\n',settings.Npart); %Number of particles
     fprintf(outfile,'%g %g %g %g %g %g\r\n',0,0,0,0,0,0); % Starting offset
-    %X Twiss parameters:
-    fprintf(outfile,'%g %g %g\r\n',settings.Alphax,settings.Betax,settings.Epsx); 
-    %Y Twiss parameters:    
-    fprintf(outfile,'%g %g %g\r\n',settings.Alphay,settings.Betay,settings.Epsy);    
-    %Energy Parameters
-    if settings.ZLaw==5
-        %Energy width, dummy(x2)
-        fprintf(outfile,'%g %g %g\r\n',settings.Deltae,0,0); 
-    else
-        %Z Twiss Parameters
-        fprintf(outfile,'%g %g %g\r\n',settings.Alphaz,settings.Betaz,...
-            settings.Epsz);
-        unitstruct.Betaz='[deg/keV]';
-        unitstruct.Epsz='[deg.keV]';
+    if settings.ZLaw<=6
+        %X Twiss parameters:
+        fprintf(outfile,'%g %g %g\r\n',settings.Alphax,settings.Betax,settings.Epsx); 
+        %Y Twiss parameters:    
+        fprintf(outfile,'%g %g %g\r\n',settings.Alphay,settings.Betay,settings.Epsy);    
+        %Energy Parameters
+        if settings.ZLaw==5
+            %Energy width, dummy(x2)
+            fprintf(outfile,'%g %g %g\r\n',settings.Deltae,0,0); 
+        else
+            %Z Twiss Parameters
+            fprintf(outfile,'%g %g %g\r\n',settings.Alphaz,settings.Betaz,...
+                settings.Epsz);
+            unitstruct.Betaz='[deg/keV]';
+            unitstruct.Epsz='[deg.keV]';
+        end
+    end
+    if settings.ZLaw >= 11
+        %Beam Extent
+        fprintf(outfile,'%g %g %g %g %g %g\r\n',...
+            settings.Xmax,settings.XPmax,settings.Ymax,settings.YPmax,...
+            settings.Deltae,settings.Tmax);
     end
     fprintf(outfile,'%s\r\n','INPUT');
     fprintf(outfile,'%g %g %g\r\n',931.49432,settings.A,settings.Q);
@@ -486,8 +517,8 @@ while ~feof(layoutfile)
             end
             solfile=devices{id,1}{1,2};
             if ~ispc
-                    strrep(solfile,'\','/');
-                end
+                strrep(solfile,'\','/');
+            end
             if exist(solfile,'file')==0 %Throw a warning if file isn't present
                 disperror(['Warning: Solenoid file "' solfile '" not found.'],errorflag)
                 errorflag=1;
@@ -620,6 +651,7 @@ while ~feof(layoutfile)
                 fclose all;
                 return;
             end
+            %This is the normal branch
             fprintf(outfile,'%s\r\n','REFCOG');
             fprintf(outfile,'%s\r\n','1');
             fprintf(outfile,'%s\r\n','NREF');
@@ -650,7 +682,7 @@ while ~feof(layoutfile)
             rfqdegrees=settings.(card{1,4});
             rfqphaseoffset=100*rfqdegrees/360; % degrees - > percentage
             fprintf(outfile,'%s\r\n',rfqfilename);
-            fprintf(outfile,'%s\r\n',devices{id,1}{1,3});
+            fprintf(outfile,'%s\r\n',devices{id,1}{1,3}); %Number of cells
             fprintf(outfile,'%g %g %g %s\r\n',settings.(card{1,3})-100,...
                 settings.(card{1,3})-100,rfqphaseoffset,'180');
             fprintf(outfile,'%s\r\n','REJECT');
@@ -738,7 +770,21 @@ while ~feof(layoutfile)
             if ~isfield(settings,card{1,3}) %Check for missing settings
                 disperror(['Error: Missing tune setting for ' card{1,3}],1);
                 continue
-            end            
+            end
+            if length(card) >=4 && isfield(settings,card{1,4}) %Check for X offset
+                xoff = settings.(card{1,4});
+                unitstruct.card{1,4}='[cm]';
+            else
+                xoff = 0;
+            end
+            if length(card) >=5 && isfield(settings,card{1,5}) %Check for Y offset
+                yoff = settings.(card{1,5});
+                unitstruct.card{1,5}='[cm]';
+            else
+                yoff = 0;
+            end
+            fprintf(outfile,'ALINER\r\n');
+            fprintf(outfile,'%g %g 0 0\r\n',-xoff,-yoff);
             fprintf(outfile,'%s\r\n','REJECT');
             %factor of /2 is because Dynac uses half widths here
             fprintf(outfile,'%g %g %g %g %g %g\r\n',reject(6), reject(1), reject(2),...
@@ -747,6 +793,10 @@ while ~feof(layoutfile)
             fprintf(outfile,'%s\r\n','REJECT');
             fprintf(outfile,'%g %g %g %g %g %g\r\n',reject(6), reject(1), reject(2),...
                 reject(3), reject(4), reject(5));
+            fprintf(outfile,'ALINER\r\n');
+            fprintf(outfile,'%g %g 0 0\r\n',xoff,yoff);
+            xoff = 0;
+            yoff = 0;
             unitstruct.(card{1,2})='[cm]';
             unitstruct.(card{1,3})='[cm]';
         case 'SOLENO' %Solenoid
