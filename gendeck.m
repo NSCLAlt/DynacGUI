@@ -910,7 +910,7 @@ elseif varargin{1}==1
     errortext=[get(guihand.dynac_output_textbox,'String'); {errortext}];
     set(guihand.dynac_output_textbox,'String',errortext);
 end
-if (nargin>=2)
+if (nargin>=3)
     set(guihand.dynac_output_textbox,'ForegroundColor',varargin{2})
 end
 
