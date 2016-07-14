@@ -2337,12 +2337,17 @@ function [plotlist,plotloc,shortnames,plotzpos]=scanemitplot(freqlist,handles)
     shortnames=[]; %List of short names for emittance plots
     if isempty(freqlist)
     else
-        try
-           plotfile=fopen('emit.plot');
-        catch
-           disperror('Error: Unable to open emit.plot');
-           return;
+        if exist('emit.plot','file')==0 %Throw an error if plot file not present
+            disperror('Error: emit.plot not found.');
+            return
         end
+        plotfile=fopen('emit.plot');
+%         try
+%            plotfile=fopen('emit.plot');
+%         catch
+%            disperror('Error: Unable to open emit.plot');
+%            return;
+%         end
 
 
         i=1;
